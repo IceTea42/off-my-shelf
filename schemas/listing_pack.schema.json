@@ -332,7 +332,7 @@
       "properties": {
         "language": {
           "$ref": "#/$defs/Language",
-          "default": "fr"
+          "default": "en"
         },
         "title": {
           "maxLength": 80,

@@ -118,7 +118,7 @@ class PriceEstimate(_Model):
 
 
 class ListingText(_Model):
-    language: Language = Language.FR
+    language: Language = Language.EN
     title: Annotated[str, Field(min_length=3, max_length=80)]
     description: Annotated[str, Field(min_length=1, max_length=2000)]
     tags: Annotated[list[Annotated[str, Field(min_length=1, max_length=30)]], Field(max_length=10)]
