@@ -49,6 +49,26 @@ class SceneItem(BaseModel):
         description="Short English noun phrase for a segmentation model, e.g. 'desk lamp'.",
     )
     label: str = Field(min_length=1, max_length=80, description="What the item is, briefly.")
+    short_name: str = Field(
+        min_length=1,
+        max_length=24,
+        description="1 or 2 lowercase English words naming the item, e.g. 'teapot', 'cake stand'.",
+    )
+
+
+class ShotCheck(BaseModel):
+    """Is the AI product shot a faithful picture of the real item?"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    same_item: bool
+    extra_objects: bool
+    added_defects: bool
+    reason: str = Field(min_length=1, max_length=300)
+
+    @property
+    def passed(self) -> bool:
+        return self.same_item and not self.extra_objects and not self.added_defects
 
 
 class SceneInventory(BaseModel):
@@ -184,6 +204,18 @@ Reply with one JSON object only, no prose, in exactly this shape:
 {skeleton}"""
 
 
+SHOT_CHECK_SYSTEM = """You check AI product photos for a second-hand marketplace. Image 1 is the \
+real photo of one item: {name}. Image 2 is the generated product photo. Parts of the item may be \
+hidden in image 1; completing them naturally is fine. Answer:
+- same_item: is image 2 the same kind of item, with the same shape, colours and materials?
+- extra_objects: does image 2 show any object other than the item?
+- added_defects: does image 2 show damage, dents, stains, dust or dirt that are not visible in \
+image 1? Known real defects: {defects}.
+- reason: one sentence explaining any problem, or "ok".
+Reply with one JSON object only, no prose, in exactly this shape:
+{skeleton}"""
+
+
 @dataclass(frozen=True, slots=True)
 class SparkResult[T: BaseModel]:
     value: T
@@ -231,6 +263,21 @@ class SparkAnalyzer:
             fixed = result.value.model_copy(update={"listing": listing})
             return SparkResult(fixed, result.call)
         return result
+
+    async def check_shot(
+        self, real: Image.Image, shot: Image.Image, name: str, defects: list[str]
+    ) -> SparkResult[ShotCheck]:
+        system = SHOT_CHECK_SYSTEM.format(
+            name=name,
+            defects="; ".join(defects) if defects else "none",
+            skeleton=_skeleton(ShotCheck),
+        )
+        content = [
+            {"type": "text", "text": "Image 1 (real photo), then image 2 (generated):"},
+            _image_part(real),
+            _image_part(shot),
+        ]
+        return await self._structured(PipelineStep.PRODUCT_SHOT, system, content, ShotCheck)
 
     async def _structured[T: BaseModel](
         self,

@@ -141,7 +141,7 @@ def test_parse_reply_accepts_code_fences() -> None:
 
 async def test_inventory(tmp_path: Path) -> None:
     reply = SceneInventory.model_validate(
-        {"items": [{"phrase": "desk lamp", "label": "Black desk lamp"}]}
+        {"items": [{"phrase": "desk lamp", "label": "Black desk lamp", "short_name": "lamp"}]}
     ).model_dump_json()
     analyzer, _ = _analyzer(tmp_path, [reply])
     result = await analyzer.inventory(_image())

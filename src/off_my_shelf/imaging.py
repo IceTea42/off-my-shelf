@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+import cv2
 import numpy as np
 from numpy.typing import NDArray
 from PIL import Image, ImageOps
@@ -92,8 +93,33 @@ def mask_image(mask: BoolMask) -> Image.Image:
     return Image.fromarray(mask.astype(np.uint8) * 255)
 
 
-def cutout(image: Image.Image, mask: BoolMask, box: PixelBox) -> Image.Image:
-    """The object on a transparent background, cropped to ``box``."""
+def flatten(image: Image.Image, background: tuple[int, int, int]) -> Image.Image:
+    """RGB image with any transparency composited onto a solid background."""
     rgba = image.convert("RGBA")
-    rgba.putalpha(mask_image(mask))
-    return crop(rgba, box)
+    base = Image.new("RGBA", rgba.size, (*background, 255))
+    return Image.alpha_composite(base, rgba).convert("RGB")
+
+
+SHOT_BACKGROUND = (235, 235, 235)
+HIDDEN_COLOUR = (255, 0, 255)
+
+
+def shot_input(image: Image.Image, mask: BoolMask, box: PixelBox) -> tuple[Image.Image, float]:
+    """The item on a plain background, with its hidden parts painted magenta.
+
+    Hidden = inside the item's outline (convex hull of its mask) but not visible, i.e. covered
+    by another object. Returns the image and the hidden share of the outline, 0 to 1.
+    """
+    local = mask[box.top : box.bottom, box.left : box.right].astype(np.uint8)
+    hull = np.zeros_like(local)
+    points = cv2.findNonZero(local)
+    if points is not None:
+        cv2.fillConvexPoly(hull, cv2.convexHull(points), 1)
+    hidden = (hull == 1) & (local == 0)
+    pixels = np.array(crop(image.convert("RGB"), box))
+    out = np.empty_like(pixels)
+    out[:] = SHOT_BACKGROUND
+    out[local == 1] = pixels[local == 1]
+    out[hidden] = HIDDEN_COLOUR
+    share = float(hidden.sum() / max(int(hull.sum()), 1))
+    return Image.fromarray(out), share

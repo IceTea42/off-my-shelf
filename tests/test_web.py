@@ -86,7 +86,7 @@ def test_upload_runs_the_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         pack = run["pack"]
         assert isinstance(pack, dict)
         assert pack["items"][0]["analysis"]["listing"]["language"] == "fr"
-        assert pack["items"][0]["product_shots"] == ["shots/item-001.webp"]
+        assert pack["items"][0]["product_shots"] == ["shots/item-001-lamp.jpg"]
 
 
 def test_bad_requests(tmp_path: Path) -> None:

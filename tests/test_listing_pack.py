@@ -78,17 +78,27 @@ async def test_transcriber_live_then_cached(tmp_path: Path) -> None:
     assert again == text and cached.cached
 
 
-async def test_product_shot_live_then_offline(tmp_path: Path) -> None:
+async def test_product_shot_prompt_cache_and_jpeg(tmp_path: Path) -> None:
     client = FakeMetaClient([])
     cache = DiskCache(tmp_path)
-    item = Image.new("RGBA", (40, 30), (200, 0, 0, 255))
-    shot, call = await ProductPhotographer(client, "muse-image-1.0", cache).shoot(item)  # type: ignore[arg-type]
-    assert shot.startswith(b"RIFF") and call.cost_usd == pytest.approx(0.01)
+    item = Image.new("RGB", (40, 30), (200, 0, 0))
+    photographer = ProductPhotographer(client, "muse-image-1.0", cache)  # type: ignore[arg-type]
+    shot, call = await photographer.shoot(item, "white dinner plate", ["chipped rim"], True)
+    assert shot.startswith(b"\xff\xd8") and call.cost_usd == pytest.approx(0.01)
+    prompt = client.image_calls[0]["prompt"]
+    assert "white dinner plate" in prompt and "chipped rim" in prompt and "magenta" in prompt
     assert client.image_calls[0]["size"] == "1024x1024"
-    again, cached = await ProductPhotographer(None, "muse-image-1.0", cache).shoot(item)
+
+    again, cached = await ProductPhotographer(None, "muse-image-1.0", cache).shoot(
+        item, "white dinner plate", ["chipped rim"], True
+    )
     assert again == shot and cached.cached
+    await photographer.shoot(item, "white dinner plate", [], rejected_because="added a dent")
+    retry_prompt = client.image_calls[1]["prompt"]
+    assert retry_prompt.startswith("A previous attempt was rejected: added a dent")
+    assert "magenta" not in retry_prompt and "defects to keep visible: none" in retry_prompt
     with pytest.raises(OfflineCacheMissError):
-        await ProductPhotographer(None, "muse-image-1.0", cache).shoot(Image.new("RGBA", (5, 5)))
+        await ProductPhotographer(None, "muse-image-1.0", cache).shoot(item, "other", [])
 
 
 def test_render_html_escapes_and_summarises() -> None:

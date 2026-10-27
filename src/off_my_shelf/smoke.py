@@ -88,12 +88,12 @@ async def smoke_vision(settings: Settings, args: argparse.Namespace) -> None:
 
 
 async def smoke_image(settings: Settings, args: argparse.Namespace) -> None:
-    """A product shot of the whole photo, saved next to the cache for a look."""
+    """A product shot of the photo's main item (named by --phrase), saved for a look."""
     image = load_image(args.image, settings.max_image_side_px)
     cache = DiskCache(settings.cache_dir)
     photographer = ProductPhotographer(make_client(settings), settings.image_model, cache)
-    shot, call = await photographer.shoot(image)
-    out = settings.cache_dir / "smoke_product_shot.webp"
+    shot, call = await photographer.shoot(image, args.phrase, [])
+    out = settings.cache_dir / "smoke_product_shot.jpg"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(shot)
     print(

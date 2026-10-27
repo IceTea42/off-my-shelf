@@ -20,6 +20,8 @@ SAM_SAMPLE = (
 )
 SAM_SIZE = (320, 334)
 ANALYSIS_JSON = load_mock_pack().items[0].analysis.model_dump_json()
+SHOT_OK = '{"same_item": true, "extra_objects": false, "added_defects": false, "reason": "ok"}'
+SHOT_BAD = '{"same_item": true, "extra_objects": false, "added_defects": true, "reason": "dent"}'
 
 
 def webp_bytes(size: tuple[int, int] = (32, 32)) -> bytes:
@@ -33,7 +35,7 @@ class FakeMetaClient:
 
     def __init__(self, phrases: list[str], sam_text: str = SAM_SAMPLE) -> None:
         inventory = SceneInventory.model_validate(
-            {"items": [{"phrase": p, "label": p.title()} for p in phrases]}
+            {"items": [{"phrase": p, "label": p.title(), "short_name": p} for p in phrases]}
         )
         self.inventory_json = inventory.model_dump_json()
         self.sam_text = sam_text
@@ -42,13 +44,15 @@ class FakeMetaClient:
         self.image_calls: list[dict[str, Any]] = []
         self.post_calls: list[tuple[str, dict[str, Any]]] = []
         self.transcript = "It works but the cable is a bit worn."
+        self.shot_checks = [SHOT_OK]
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._chat))
         self.responses = SimpleNamespace(create=self._responses)
         self.images = SimpleNamespace(edit=self._image_edit)
 
     async def _image_edit(self, **kwargs: Any) -> SimpleNamespace:  # noqa: ANN401
         self.image_calls.append(kwargs)
-        data = base64.b64encode(webp_bytes()).decode("ascii")
+        # A different picture per call, as a real image model would return.
+        data = base64.b64encode(webp_bytes((32 + len(self.image_calls), 32))).decode("ascii")
         return SimpleNamespace(data=[SimpleNamespace(b64_json=data)])
 
     async def post(self, path: str, **kwargs: Any) -> dict[str, Any]:  # noqa: ANN401
@@ -58,7 +62,12 @@ class FakeMetaClient:
     async def _chat(self, **kwargs: Any) -> SimpleNamespace:  # noqa: ANN401
         self.chat_calls.append(kwargs)
         name = kwargs["response_format"]["json_schema"]["name"]
-        content = self.inventory_json if name == "SceneInventory" else ANALYSIS_JSON
+        if name == "SceneInventory":
+            content = self.inventory_json
+        elif name == "ShotCheck":
+            content = self.shot_checks[min(len(self.image_calls), len(self.shot_checks)) - 1]
+        else:
+            content = ANALYSIS_JSON
         return SimpleNamespace(
             choices=[
                 SimpleNamespace(message=SimpleNamespace(content=content), finish_reason="stop")

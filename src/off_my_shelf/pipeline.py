@@ -5,16 +5,20 @@ overlapping detections are merged -> each item crop gets a full Muse Spark listi
 """
 
 import asyncio
+import io
+import re
+import unicodedata
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from openai import OpenAIError
+from PIL import Image
 
 from off_my_shelf.cache import DiskCache, OfflineCacheMissError
 from off_my_shelf.config import Settings
-from off_my_shelf.imaging import PixelBox, crop, cutout, encode, mask_image
+from off_my_shelf.imaging import PixelBox, crop, encode, mask_image, shot_input
 from off_my_shelf.media import Still, collect_inputs, stills
 from off_my_shelf.meta_client import make_client, make_open_weights_client
 from off_my_shelf.mocks import save_pack
@@ -29,9 +33,11 @@ from off_my_shelf.schema import (
     ModelCall,
     SourceRef,
 )
-from off_my_shelf.spark import SparkAnalyzer
+from off_my_shelf.spark import SparkAnalyzer, SparkReplyError
 
 DUPLICATE_IOU = 0.6
+SHOT_ATTEMPTS = 2
+HIDDEN_MIN_SHARE = 0.02  # below this, tiny mask gaps are noise, not occlusion
 CROP_PADDING = 0.08
 Progress = Callable[[str], None]
 
@@ -73,6 +79,7 @@ class _Found:
     media_path: str
     segment: Segment
     calls: tuple[ModelCall, ...]
+    slug: str
 
 
 def _best(segments: Sequence[Segment]) -> Segment | None:
@@ -101,6 +108,14 @@ def _same_item(a: ItemAnalysis, b: ItemAnalysis) -> bool:
         ib.name.casefold(),
         (ib.brand or "").casefold(),
     )
+
+
+def slugify(text: str, max_words: int = 2) -> str:
+    """'Cake Stand!' -> 'cake-stand': the last ``max_words`` ASCII words (English noun phrases
+    end with the noun), accents folded, never empty."""
+    ascii_text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    words = re.findall(r"[a-z0-9]+", ascii_text.casefold())[-max_words:]
+    return "-".join(words) or "item"
 
 
 def _split_cost(call: ModelCall, parts: int) -> ModelCall:
@@ -158,24 +173,29 @@ class Pipeline:
 
     async def _detect(self, still: Still, media_path: str) -> list[_Found]:
         inventory = await self.services.spark.inventory(still.image)
-        phrases = list(dict.fromkeys(item.phrase for item in inventory.value.items))
-        self.progress(f"{media_path}: looking for {', '.join(phrases) or 'nothing'}")
+        unique = {item.phrase: item for item in inventory.value.items}
+        self.progress(f"{media_path}: looking for {', '.join(unique) or 'nothing'}")
 
         async def segment(phrase: str) -> tuple[Segment | None, ModelCall]:
             async with self._limit:
                 run = await self.services.sam.segment(still.image, phrase)
             return _best(run.segments), run.call
 
-        results = await asyncio.gather(*(segment(p) for p in phrases))
-        hits = [(seg, call) for seg, call in results if seg is not None]
+        results = await asyncio.gather(*(segment(p) for p in unique))
+        hits = [
+            (seg, call, slugify(item.short_name or item.phrase))
+            for item, (seg, call) in zip(unique.values(), results, strict=True)
+            if seg is not None
+        ]
         share = _split_cost(inventory.call, len(hits))
-        return [_Found(still, media_path, seg, (share, call)) for seg, call in hits]
+        return [_Found(still, media_path, seg, (share, call), slug) for seg, call, slug in hits]
 
     async def _item(self, item_id: str, found: _Found, out_dir: Path, language: Language) -> Item:
         image = found.still.image
-        box: PixelBox = found.segment.box.padded(CROP_PADDING, image.width, image.height)
+        box = _crop_box(found)
         item_crop = crop(image, box)
-        crop_path, mask_path = f"crops/{item_id}.jpg", f"masks/{item_id}.png"
+        stem = f"{item_id}-{found.slug}"
+        crop_path, mask_path = f"crops/{stem}.jpg", f"masks/{stem}.png"
         for rel, data in (
             (crop_path, encode(item_crop, "JPEG")),
             (mask_path, encode(mask_image(found.segment.mask), "PNG")),
@@ -185,7 +205,7 @@ class Pipeline:
 
         async with self._limit:
             analysis = await self.services.spark.analyze(item_crop, language)
-        shots, shot_calls = await self._product_shot(item_id, found, box, out_dir)
+        shots, shot_calls = await self._product_shot(stem, found, analysis.value, out_dir)
         return Item(
             item_id=item_id,
             detection=Detection(
@@ -205,24 +225,55 @@ class Pipeline:
         )
 
     async def _product_shot(
-        self, item_id: str, found: _Found, box: PixelBox, out_dir: Path
+        self, stem: str, found: _Found, analysis: ItemAnalysis, out_dir: Path
     ) -> tuple[list[str], list[ModelCall]]:
-        """A clean product shot, or none if the image model fails: a listing still works."""
+        """A checked product shot, or none: a wrong picture is worse than no picture.
+
+        Muse Image draws the shot; Muse Spark compares it with the real crop (same item, no
+        extra objects, no invented damage). One corrected retry is allowed.
+        """
         photographer = self.services.photographer
         if photographer is None:
             return [], []
+        box = _crop_box(found)
+        real = crop(found.still.image, box)
+        source, hidden_share = shot_input(found.still.image, found.segment.mask, box)
+        name = analysis.identification.name
+        defects = analysis.condition.defects
+        calls: list[ModelCall] = []
+        rejected: str | None = None
         try:
-            async with self._limit:
-                shot, call = await photographer.shoot(
-                    cutout(found.still.image, found.segment.mask, box)
-                )
-        except (OpenAIError, EmptyImageResponseError, OfflineCacheMissError) as error:
-            self.progress(f"{item_id}: no product shot ({type(error).__name__})")
-            return [], []
-        rel = f"shots/{item_id}.webp"
-        (out_dir / rel).parent.mkdir(parents=True, exist_ok=True)
-        (out_dir / rel).write_bytes(shot)
-        return [rel], [call]
+            for _ in range(SHOT_ATTEMPTS):
+                async with self._limit:
+                    shot, call = await photographer.shoot(
+                        source, name, defects, hidden_share > HIDDEN_MIN_SHARE, rejected
+                    )
+                    calls.append(call)
+                    check = await self.services.spark.check_shot(
+                        real, Image.open(io.BytesIO(shot)), name, defects
+                    )
+                    calls.append(check.call)
+                if check.value.passed:
+                    rel = f"shots/{stem}.jpg"
+                    (out_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+                    (out_dir / rel).write_bytes(shot)
+                    return [rel], calls
+                rejected = check.value.reason
+        except (
+            OpenAIError,
+            EmptyImageResponseError,
+            OfflineCacheMissError,
+            SparkReplyError,
+        ) as error:
+            self.progress(f"{stem}: no product shot ({type(error).__name__})")
+            return [], calls
+        self.progress(f"{stem}: no product shot (check failed: {rejected})")
+        return [], calls
+
+
+def _crop_box(found: _Found) -> PixelBox:
+    image = found.still.image
+    return found.segment.box.padded(CROP_PADDING, image.width, image.height)
 
 
 def _drop_video_repeats(items: list[Item]) -> list[Item]:

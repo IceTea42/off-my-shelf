@@ -6,7 +6,18 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from off_my_shelf.imaging import PixelBox, crop, cutout, data_url, encode, load_image, mask_image
+from off_my_shelf.imaging import (
+    HIDDEN_COLOUR,
+    SHOT_BACKGROUND,
+    PixelBox,
+    crop,
+    data_url,
+    encode,
+    flatten,
+    load_image,
+    mask_image,
+    shot_input,
+)
 
 
 def test_pixel_box_geometry() -> None:
@@ -35,13 +46,22 @@ def test_encode_and_data_url() -> None:
     assert data_url(data, "PNG").startswith("data:image/png;base64,iVBOR")
 
 
-def test_mask_cutout_and_crop() -> None:
+def test_shot_input_marks_hidden_parts() -> None:
     image = Image.new("RGB", (10, 10), "blue")
     mask = np.zeros((10, 10), dtype=bool)
-    mask[2:5, 3:7] = True
-    box = PixelBox(3, 2, 7, 5)
+    mask[2:8, 2:8] = True
+    mask[4:6, 4:6] = False  # a leaf covers the middle of the plate
+    box = PixelBox(1, 1, 9, 9)
+    source, share = shot_input(image, mask, box)
+    assert source.size == (8, 8) and source.mode == "RGB"
+    assert source.getpixel((4, 4)) == HIDDEN_COLOUR
+    assert source.getpixel((2, 2)) == (0, 0, 255)
+    assert source.getpixel((0, 0)) == SHOT_BACKGROUND
+    assert share == pytest.approx(4 / 36)
     assert mask_image(mask).getextrema() == (0, 255)
-    piece = cutout(image, mask, box)
-    assert piece.size == (4, 3) and piece.mode == "RGBA"
-    assert piece.getchannel("A").getextrema() == (255, 255)
-    assert crop(image, box).size == (4, 3)
+    assert crop(image, box).size == (8, 8)
+
+
+def test_flatten_removes_transparency() -> None:
+    clear = Image.new("RGBA", (4, 4), (255, 0, 0, 0))
+    assert flatten(clear, (1, 2, 3)).getpixel((0, 0)) == (1, 2, 3)
