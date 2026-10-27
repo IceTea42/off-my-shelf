@@ -1,0 +1,74 @@
+[project]
+name = "off-my-shelf"
+version = "0.1.0"
+description = "Film the things you no longer use and get ready-to-post resale listings."
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [{ name = "Ögem Eychenne" }]
+requires-python = ">=3.12"
+classifiers = [
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+]
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "mypy>=1.13",
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "ruff>=0.8",
+]
+
+[build-system]
+requires = ["uv_build>=0.9,<1"]
+build-backend = "uv_build"
+
+# --- Lint + format -----------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E", "W",   # pycodestyle
+  "F",        # pyflakes (unused imports/variables)
+  "I",        # isort
+  "UP",       # pyupgrade
+  "B",        # bugbear
+  "C4",       # comprehensions
+  "SIM",      # simplify
+  "N",        # naming
+  "ANN",      # type annotations everywhere
+  "S",        # security (bandit)
+  "PTH",      # pathlib over os.path: keeps paths portable across Windows and Linux
+  "PL",       # pylint
+  "RUF",      # ruff-specific
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004"]  # assert and magic numbers are fine in tests
+
+[tool.ruff.format]
+line-ending = "lf"
+
+# --- Types -------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+
+# --- Tests -------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
+
+[tool.coverage.run]
+source = ["off_my_shelf"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
