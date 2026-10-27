@@ -1,0 +1,274 @@
+{
+  "schema_version": "1.0",
+  "run_id": "mock-0001",
+  "created_at": "2026-10-27T10:00:00+01:00",
+  "media": [
+    "media/shelf_01.png",
+    "media/hallway_02.png"
+  ],
+  "items": [
+    {
+      "item_id": "item-001",
+      "detection": {
+        "source": { "media": "media/shelf_01.png" },
+        "bbox": { "x0": 0.05, "y0": 0.1, "x1": 0.3, "y1": 0.85 },
+        "score": 0.94,
+        "crop_path": "crops/item-001.png",
+        "mask_path": "masks/item-001.png"
+      },
+      "analysis": {
+        "identification": {
+          "name": "Lampe de bureau articulée",
+          "brand": null,
+          "model": null,
+          "category": "home_kitchen",
+          "confidence": 0.88
+        },
+        "condition": {
+          "grade": "good",
+          "defects": ["Légères rayures sur le pied"]
+        },
+        "price": {
+          "currency": "EUR",
+          "low": 8.0,
+          "suggested": 12.0,
+          "high": 18.0,
+          "rationale": "Lampes articulées d'occasion en bon état : 8 à 18 € ; prix bas pour vendre vite."
+        },
+        "listing": {
+          "language": "fr",
+          "title": "Lampe de bureau articulée noire, bon état",
+          "description": "Lampe de bureau à bras articulé, tête orientable, ampoule E27. Fonctionne parfaitement. Légères rayures sur le pied. À récupérer à Paris ou envoi possible.",
+          "tags": ["lampe", "bureau", "éclairage", "articulée"]
+        },
+        "triage": {
+          "decision": "sell",
+          "reason": "Fonctionne, demande régulière en occasion."
+        }
+      },
+      "pricing_mode": "sell_fast",
+      "product_shots": ["shots/item-001.png"],
+      "voice_note": "Elle marche très bien, juste quelques rayures en dessous.",
+      "buyer_replies": [
+        {
+          "buyer_message": "Bonjour, vous la laisseriez à 8 € ?",
+          "draft_reply": "Bonjour ! Je peux descendre à 10 € si vous venez la chercher cette semaine.",
+          "approved": false
+        }
+      ],
+      "calls": [
+        {
+          "step": "segment",
+          "model": "sam-3.1",
+          "cache_key": "sha256:mock-segment-shelf01",
+          "cached": true,
+          "latency_ms": 1800
+        },
+        {
+          "step": "analyze",
+          "model": "muse-spark",
+          "cache_key": "sha256:mock-analyze-item001",
+          "cached": true,
+          "input_tokens": 1450,
+          "output_tokens": 320,
+          "cost_usd": 0.004,
+          "latency_ms": 2600
+        },
+        {
+          "step": "product_shot",
+          "model": "muse-image",
+          "cache_key": "sha256:mock-shot-item001",
+          "cached": true,
+          "cost_usd": 0.02,
+          "latency_ms": 7400
+        },
+        {
+          "step": "transcribe",
+          "model": "muse-voice-transcribe",
+          "cache_key": "sha256:mock-voice-item001",
+          "cached": true,
+          "cost_usd": 0.001,
+          "latency_ms": 900
+        },
+        {
+          "step": "buyer_reply",
+          "model": "muse-spark",
+          "cache_key": "sha256:mock-reply-item001",
+          "cached": true,
+          "input_tokens": 600,
+          "output_tokens": 60,
+          "cost_usd": 0.001,
+          "latency_ms": 1100
+        }
+      ]
+    },
+    {
+      "item_id": "item-002",
+      "detection": {
+        "source": { "media": "media/shelf_01.png" },
+        "bbox": { "x0": 0.38, "y0": 0.35, "x1": 0.6, "y1": 0.85 },
+        "score": 0.97,
+        "crop_path": "crops/item-002.png",
+        "mask_path": "masks/item-002.png"
+      },
+      "analysis": {
+        "identification": {
+          "name": "Hardcover vegetarian cookbook",
+          "brand": null,
+          "model": null,
+          "category": "books_media",
+          "confidence": 0.81
+        },
+        "condition": {
+          "grade": "like_new",
+          "defects": []
+        },
+        "price": {
+          "currency": "EUR",
+          "low": 6.0,
+          "suggested": 12.0,
+          "high": 14.0,
+          "rationale": "Like-new hardcover cookbooks resell for 6–14 €; priced near the top for max value."
+        },
+        "listing": {
+          "language": "en",
+          "title": "Vegetarian cookbook, hardcover, like new",
+          "description": "Hardcover vegetarian cookbook, read once, no notes or stains. Spine intact. Pick-up in Paris or shipping.",
+          "tags": ["cookbook", "vegetarian", "hardcover", "kitchen"]
+        },
+        "triage": {
+          "decision": "sell",
+          "reason": "Like new and books sell steadily online."
+        }
+      },
+      "pricing_mode": "max_value",
+      "product_shots": ["shots/item-002.png"],
+      "calls": [
+        {
+          "step": "analyze",
+          "model": "muse-spark",
+          "cache_key": "sha256:mock-analyze-item002",
+          "cached": true,
+          "input_tokens": 1380,
+          "output_tokens": 290,
+          "cost_usd": 0.004,
+          "latency_ms": 2400
+        }
+      ]
+    },
+    {
+      "item_id": "item-003",
+      "detection": {
+        "source": { "media": "media/shelf_01.png" },
+        "bbox": { "x0": 0.68, "y0": 0.55, "x1": 0.95, "y1": 0.85 },
+        "score": 0.9,
+        "crop_path": "crops/item-003.png"
+      },
+      "analysis": {
+        "identification": {
+          "name": "4'lü seramik kupa seti",
+          "brand": null,
+          "model": null,
+          "category": "home_kitchen",
+          "confidence": 0.92
+        },
+        "condition": {
+          "grade": "fair",
+          "defects": ["Bir kupanın kenarında küçük çatlak"]
+        },
+        "price": {
+          "currency": "EUR",
+          "low": 5.0,
+          "suggested": 7.0,
+          "high": 10.0,
+          "rationale": "Kusurlu kupa setleri 5–10 € arası satılıyor."
+        },
+        "listing": {
+          "language": "tr",
+          "title": "4'lü seramik kupa seti, mavi sırlı",
+          "description": "Dört adet mavi sırlı seramik kupa. Birinin kenarında küçük bir çatlak var, diğerleri kusursuz. Bulaşık makinesinde yıkanabilir.",
+          "tags": ["kupa", "seramik", "mutfak"]
+        },
+        "triage": {
+          "decision": "sell",
+          "reason": "Üç kupa kusursuz, set olarak satılabilir."
+        }
+      },
+      "pricing_mode": "sell_fast"
+    },
+    {
+      "item_id": "item-004",
+      "detection": {
+        "source": { "media": "media/hallway_02.png" },
+        "bbox": { "x0": 0.1, "y0": 0.5, "x1": 0.42, "y1": 0.92 },
+        "score": 0.86,
+        "crop_path": "crops/item-004.png"
+      },
+      "analysis": {
+        "identification": {
+          "name": "Bottes de pluie enfant, pointure 28",
+          "brand": null,
+          "model": null,
+          "category": "kids_toys",
+          "confidence": 0.79
+        },
+        "condition": {
+          "grade": "fair",
+          "defects": ["Semelles usées", "Petite tache sur la tige gauche"]
+        },
+        "price": {
+          "currency": "EUR",
+          "low": 2.0,
+          "suggested": 3.0,
+          "high": 5.0,
+          "rationale": "Bottes enfant usées : 2 à 5 €, peu de valeur face au temps de vente."
+        },
+        "listing": {
+          "language": "fr",
+          "title": "Bottes de pluie enfant pointure 28",
+          "description": "Bottes de pluie pour enfant, pointure 28, encore étanches. Semelles usées et petite tache sur la botte gauche.",
+          "tags": ["bottes", "pluie", "enfant", "28"]
+        },
+        "triage": {
+          "decision": "donate",
+          "reason": "Encore utilisables mais valeur trop faible pour une vente."
+        }
+      },
+      "voice_note": "Elles sont encore étanches, mon fils les a juste dépassées."
+    },
+    {
+      "item_id": "item-005",
+      "detection": {
+        "source": { "media": "media/hallway_02.png" },
+        "bbox": { "x0": 0.55, "y0": 0.3, "x1": 0.88, "y1": 0.9 },
+        "score": 0.91,
+        "crop_path": "crops/item-005.png"
+      },
+      "analysis": {
+        "identification": {
+          "name": "Bouilloire électrique en inox",
+          "category": "electronics",
+          "confidence": 0.84
+        },
+        "condition": {
+          "grade": "broken"
+        },
+        "price": {
+          "low": 0.0,
+          "suggested": 0.0,
+          "high": 0.0,
+          "rationale": "Ne chauffe plus : aucune valeur de revente."
+        },
+        "listing": {
+          "title": "Bouilloire électrique en inox (HS)",
+          "description": "Bouilloire électrique 1,7 L en inox, ne chauffe plus.",
+          "tags": ["bouilloire", "électroménager"]
+        },
+        "triage": {
+          "decision": "recycle",
+          "reason": "Appareil électrique hors service : à déposer en point de collecte DEEE."
+        }
+      }
+    }
+  ]
+}
