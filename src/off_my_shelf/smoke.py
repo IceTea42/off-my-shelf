@@ -3,6 +3,7 @@
 Usage:
     uv run python -m off_my_shelf.smoke spark
     uv run python -m off_my_shelf.smoke sam --image path/to/photo.jpg --phrase mug
+    uv run python -m off_my_shelf.smoke vision --image path/to/photo.jpg
 """
 
 import argparse
@@ -19,6 +20,7 @@ from off_my_shelf.imaging import load_image
 from off_my_shelf.meta_client import make_client
 from off_my_shelf.mocks import MOCK_PACK_DIR
 from off_my_shelf.sam import SamSegmenter
+from off_my_shelf.spark import SparkAnalyzer
 
 DEFAULT_IMAGE = MOCK_PACK_DIR / "media" / "shelf_01.png"
 
@@ -60,8 +62,28 @@ async def smoke_sam(settings: Settings, args: argparse.Namespace) -> None:
         )
 
 
+async def smoke_vision(settings: Settings, args: argparse.Namespace) -> None:
+    """Scene inventory, then a full listing for the whole photo, with structured output."""
+    image = load_image(args.image, settings.max_image_side_px)
+    analyzer = SparkAnalyzer(
+        make_client(settings),
+        settings.spark_model,
+        DiskCache(settings.cache_dir),
+        settings.max_output_tokens,
+    )
+    inventory = await analyzer.inventory(image)
+    print(f"inventory: {[item.phrase for item in inventory.value.items]}")
+    print(f"  tokens in={inventory.call.input_tokens} out={inventory.call.output_tokens}")
+    listing = await analyzer.analyze(image, settings.default_language)
+    print(listing.value.model_dump_json(indent=2))
+    print(
+        f"  tokens in={listing.call.input_tokens} out={listing.call.output_tokens} "
+        f"cost_usd={listing.call.cost_usd} latency_ms={listing.call.latency_ms}"
+    )
+
+
 Check = Callable[[Settings, argparse.Namespace], Coroutine[Any, Any, None]]
-CHECKS: dict[str, Check] = {"spark": smoke_spark, "sam": smoke_sam}
+CHECKS: dict[str, Check] = {"spark": smoke_spark, "sam": smoke_sam, "vision": smoke_vision}
 
 
 def main(argv: list[str] | None = None) -> None:
