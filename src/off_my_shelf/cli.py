@@ -24,6 +24,17 @@ def _export(args: argparse.Namespace) -> None:
     print(f"listing pack: {export_pack(args.pack)}")
 
 
+def _serve(args: argparse.Namespace) -> None:
+    import uvicorn  # noqa: PLC0415 - only the serve command needs the web stack
+
+    from off_my_shelf.web import create_app  # noqa: PLC0415
+
+    settings = get_settings()
+    host, port = args.host or settings.host, args.port or settings.port
+    print(f"Off My Shelf on http://{host}:{port}")
+    uvicorn.run(create_app(settings), host=host, port=port)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="off-my-shelf", description="Resale listings from media")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -39,6 +50,11 @@ def main(argv: list[str] | None = None) -> None:
     export = commands.add_parser("export", help="rebuild index.html, listings and zip of a pack")
     export.add_argument("pack", type=Path, help="pack folder containing listing_pack.json")
     export.set_defaults(handler=_export)
+
+    serve = commands.add_parser("serve", help="start the web app")
+    serve.add_argument("--host", help="interface, e.g. 0.0.0.0 to share on your network")
+    serve.add_argument("--port", type=int)
+    serve.set_defaults(handler=_serve)
 
     args = parser.parse_args(argv)
     args.handler(args)

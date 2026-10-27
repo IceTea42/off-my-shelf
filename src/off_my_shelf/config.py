@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # Disk cache for model results, keyed by input hash
     cache_dir: Path = Path(".cache")
 
+    # Web app: where uploads and packs of each run are kept
+    runs_dir: Path = Path("packs/web")
+    host: str = "127.0.0.1"
+    port: int = 8000
+
     # Bounds that keep each call small and cheap
     max_image_side_px: int = Field(default=1280, ge=256)
     # Reasoning tokens count toward the output budget, so this leaves room for thinking.

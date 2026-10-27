@@ -12,6 +12,7 @@ classifiers = [
   "Operating System :: POSIX :: Linux",
 ]
 dependencies = [
+    "fastapi>=0.162.0",
     "jinja2>=3.1.6",
     "meta-sam-parser>=0.1.0",
     "numpy>=2.5.4",
@@ -21,6 +22,8 @@ dependencies = [
     "pillow-heif>=1.8.1",
     "pydantic>=2.9",
     "pydantic-settings>=2.16.1",
+    "python-multipart>=0.0.32",
+    "uvicorn>=0.54.0",
 ]
 
 [project.scripts]
@@ -28,6 +31,7 @@ off-my-shelf = "off_my_shelf.cli:main"
 
 [dependency-groups]
 dev = [
+  "httpx>=0.28.1",
   "mypy>=1.13",
   "pre-commit>=4.7.0",
   "pytest>=8.3",
