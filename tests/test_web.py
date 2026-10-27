@@ -2,12 +2,16 @@
 
 import io
 import time
+import wave
 import zipfile
 from pathlib import Path
 
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
+from openai import InternalServerError
 from PIL import Image
+from pydantic import SecretStr
 
 from fakes import SAM_SIZE, FakeMetaClient
 from off_my_shelf import web
@@ -21,7 +25,11 @@ from off_my_shelf.spark import SparkAnalyzer
 
 def _settings(tmp_path: Path) -> Settings:
     return Settings(  # type: ignore[call-arg]
-        _env_file=None, cache_dir=tmp_path / "cache", runs_dir=tmp_path / "runs"
+        _env_file=None,
+        cache_dir=tmp_path / "cache",
+        runs_dir=tmp_path / "runs",
+        min_item_side_px=1,
+        min_item_pixels=1,
     )
 
 
@@ -98,3 +106,77 @@ def test_bad_requests(tmp_path: Path) -> None:
         assert bad.status_code == 400
         assert client.get("/api/runs/nope").status_code == 404
         assert client.get("/api/runs/nope/zip").status_code == 404
+
+
+def _wav() -> bytes:
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(16_000)
+        out.writeframes(b"\x10\x00" * 16_000)
+    return buffer.getvalue()
+
+
+def test_transcribe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeMetaClient(["lamp"])
+    monkeypatch.setattr(web, "make_client", lambda _settings: fake)
+    settings = _settings(tmp_path).model_copy(update={"meta_api_key": SecretStr("test-key")})
+    with TestClient(web.create_app(settings)) as client:
+        voice = [("voice", ("goal.wav", _wav(), "audio/wav"))]
+        reply = client.post("/api/transcribe", files=voice)
+        assert reply.status_code == 200
+        assert reply.json()["transcript"] == fake.transcript
+        assert (
+            client.post(
+                "/api/transcribe", files=[("voice", ("x.wav", b"no", "audio/wav"))]
+            ).status_code
+            == 400
+        )
+        fake.transcript = " "
+        silent = [("voice", ("other.wav", _wav()[:-2] + b"\x20\x00", "audio/wav"))]
+        assert client.post("/api/transcribe", files=silent).status_code == 422
+
+
+def test_transcribe_offline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("META_API_KEY", raising=False)
+    monkeypatch.delenv("MODEL_API_KEY", raising=False)
+    with TestClient(web.create_app(_settings(tmp_path))) as client:
+        voice = [("voice", ("goal.wav", _wav(), "audio/wav"))]
+        assert client.post("/api/transcribe", files=voice).status_code == 503
+
+
+def test_budget_stops_live_work(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(web, "make_client", lambda _settings: FakeMetaClient(["lamp"]))
+    settings = _settings(tmp_path).model_copy(
+        update={"meta_api_key": SecretStr("test-key"), "budget_usd": 0.00001}
+    )
+    with TestClient(web.create_app(settings)) as client:
+        voice = [("voice", ("goal.wav", _wav(), "audio/wav"))]
+        assert client.post("/api/transcribe", files=voice).status_code == 200
+        assert client.post("/api/transcribe", files=voice).status_code == 429
+        upload = [("files", ("shelf.png", _png(), "image/png"))]
+        assert client.post("/api/runs", files=upload).status_code == 429
+
+
+def test_transcribe_debug_keeps_notes_and_reports_api_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake = FakeMetaClient([])
+    monkeypatch.setattr(web, "make_client", lambda _settings: fake)
+    settings = _settings(tmp_path).model_copy(
+        update={"meta_api_key": SecretStr("test-key"), "debug_voice": True}
+    )
+    url = "https://api.meta.ai/v1/asr/transcribe"
+    response = httpx2.Response(
+        502, request=httpx2.Request("POST", url), json={"error": {"type": "upstream"}}
+    )
+    fake.post_error = InternalServerError(
+        "bad gateway", response=response, body={"type": "upstream"}
+    )
+    with TestClient(web.create_app(settings)) as client:
+        reply = client.post("/api/transcribe", files=[("voice", ("goal.wav", _wav(), "audio/wav"))])
+    assert reply.status_code == 502
+    assert "HTTP 502 from POST /v1/asr/transcribe: {'type': 'upstream'}" in reply.json()["detail"]
+    kept = sorted(path.name.split("-", 2)[-1] for path in (settings.cache_dir / "voice").iterdir())
+    assert kept == ["api.wav", "result.txt", "upload.wav"]

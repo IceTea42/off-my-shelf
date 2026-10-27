@@ -44,6 +44,7 @@ class FakeMetaClient:
         self.image_calls: list[dict[str, Any]] = []
         self.post_calls: list[tuple[str, dict[str, Any]]] = []
         self.transcript = "It works but the cable is a bit worn."
+        self.post_error: Exception | None = None
         self.shot_checks = [SHOT_OK]
         self.redraw = False
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._chat))
@@ -66,6 +67,8 @@ class FakeMetaClient:
 
     async def post(self, path: str, **kwargs: Any) -> dict[str, Any]:  # noqa: ANN401
         self.post_calls.append((path, kwargs))
+        if self.post_error is not None:
+            raise self.post_error
         return {"sessionId": "s1", "transcript": self.transcript, "audioDurationMs": 1500}
 
     async def _chat(self, **kwargs: Any) -> SimpleNamespace:  # noqa: ANN401

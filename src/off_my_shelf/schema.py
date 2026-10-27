@@ -211,6 +211,9 @@ class ListingPack(_Model):
     created_at: AwareDatetime
     media: Annotated[list[RelPath], Field(min_length=1)]
     items: list[Item]
+    warnings: list[str] = Field(
+        default_factory=list, description="Inputs or items skipped, and why, for the person"
+    )
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:

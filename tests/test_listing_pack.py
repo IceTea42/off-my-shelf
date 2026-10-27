@@ -6,6 +6,7 @@ import wave
 import zipfile
 from pathlib import Path
 
+import av
 import numpy as np
 import pytest
 from PIL import Image
@@ -16,7 +17,8 @@ from off_my_shelf.cli import main
 from off_my_shelf.export import export_pack, listing_text, render_html
 from off_my_shelf.mocks import MOCK_PACK_DIR, load_mock_pack
 from off_my_shelf.product_shots import ProductPhotographer
-from off_my_shelf.voice import AudioFormatError, Transcriber, to_api_wav
+from off_my_shelf.report import step_costs
+from off_my_shelf.voice import AudioFormatError, Transcriber, to_api_wav, wav_seconds
 
 
 def _wav(rate: int, channels: int, width: int, seconds: float = 0.5) -> bytes:
@@ -133,3 +135,35 @@ def test_cli_export(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     shutil.copytree(MOCK_PACK_DIR, pack_dir)
     main(["export", str(pack_dir)])
     assert "pack.zip" in capsys.readouterr().out
+
+
+def test_cost_report(capsys: pytest.CaptureFixture[str]) -> None:
+    pack = load_mock_pack()
+    rows = step_costs(pack)
+    calls = sum(len(item.calls) for item in pack.items)
+    assert sum(row.calls for row in rows) == calls
+    assert {(row.step, row.model) for row in rows} == {
+        (call.step.value, call.model) for item in pack.items for call in item.calls
+    }
+    main(["costs", str(MOCK_PACK_DIR)])
+    out = capsys.readouterr().out
+    assert out.startswith("| Step | Model |")
+    assert f"{len(pack.items)} items" in out
+
+
+@pytest.mark.parametrize(
+    ("container", "codec", "rate"),
+    [("webm", "libopus", 48_000), ("ogg", "libopus", 48_000), ("mp4", "aac", 44_100)],
+)
+def test_to_api_wav_decodes_browser_recordings(container: str, codec: str, rate: int) -> None:
+    buffer = io.BytesIO()
+    with av.open(buffer, mode="w", format=container) as out:
+        stream = out.add_stream(codec, rate=rate, layout="mono")
+        assert isinstance(stream, av.AudioStream)
+        tone = (np.sin(np.linspace(0, 2 * np.pi * 440, rate)) * 8000).astype("<i2")
+        frame = av.AudioFrame.from_ndarray(tone.reshape(1, -1), format="s16", layout="mono")
+        frame.sample_rate = rate
+        for packet in [*stream.encode(frame), *stream.encode(None)]:
+            out.mux(packet)
+    wav = to_api_wav(buffer.getvalue())
+    assert wav_seconds(wav) == pytest.approx(1.0, abs=0.1)

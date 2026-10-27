@@ -24,7 +24,9 @@ from off_my_shelf.spark import SparkAnalyzer
 
 
 def _settings(tmp_path: Path) -> Settings:
-    return Settings(_env_file=None, cache_dir=tmp_path / "cache")  # type: ignore[call-arg]
+    return Settings(
+        _env_file=None, cache_dir=tmp_path / "cache", min_item_side_px=1, min_item_pixels=1
+    )  # type: ignore[call-arg]
 
 
 def _services(client: FakeMetaClient, settings: Settings) -> Services:
@@ -257,3 +259,28 @@ def test_cli_offline_reports_cache_miss(tmp_path: Path, monkeypatch: pytest.Monk
     _photo(tmp_path / "photos")
     with pytest.raises(OfflineCacheMissError):
         main(["run", "photos", "--out", "pack", "--offline"])
+
+
+async def test_too_small_items_and_photos_are_skipped_with_warnings(tmp_path: Path) -> None:
+    settings = Settings(_env_file=None, cache_dir=tmp_path / "cache")  # type: ignore[call-arg]
+    photos = tmp_path / "photos"
+    _photo(photos)
+    Image.new("RGB", (200, 150), "white").save(photos / "thumb.png")
+    client = FakeMetaClient(phrases=["mug"])
+
+    pack = await Pipeline(_services(client, settings), settings).run([photos], tmp_path / "out")
+
+    assert pack.items == []
+    assert client.chat_calls[-1]["response_format"]["json_schema"]["name"] == "SceneInventory"
+    small_photo, small_item = sorted(pack.warnings, key=lambda w: "thumb" not in w)
+    assert "thumb.png: 200x150 px is too small" in small_photo
+    assert "'mug' covers only" in small_item
+
+
+async def test_all_photos_too_small_is_an_error(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    Image.new("RGB", (100, 100), "white").save(tmp_path / "tiny.png")
+    with pytest.raises(ValueError, match="too small"):
+        await Pipeline(_services(FakeMetaClient(["mug"]), settings), settings).run(
+            [tmp_path / "tiny.png"], tmp_path / "out"
+        )

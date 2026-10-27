@@ -26,6 +26,8 @@
   button:disabled { opacity:.5; cursor:default; }
   #status { margin:16px 0; color:var(--muted); min-height:1.5em; }
   #status.error { color:#a12; }
+  #warnings { margin:8px 0; padding:10px 14px; border-radius:10px; background:#f9eeda; color:#6b4a00; }
+  #warnings ul { margin:4px 0 0; padding-left:18px; }
   .bar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:8px 0; }
   #grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); }
   .card { background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden;
@@ -76,6 +78,7 @@
   </form>
 
   <div id="status"></div>
+  <div id="warnings" role="status" hidden></div>
   <div class="bar" id="bar" hidden>
     <strong id="summary"></strong>
     <a id="zip"><button type="button">Download listing pack</button></a>
@@ -102,6 +105,12 @@ function el(tag, props = {}, children = []) {
   const node = Object.assign(document.createElement(tag), props);
   node.append(...children);
   return node;
+}
+
+function setWarnings(warnings = []) {
+  $("warnings").hidden = warnings.length === 0;
+  $("warnings").replaceChildren(el("strong", { textContent: "Skipped" }),
+    el("ul", {}, warnings.map((w) => el("li", { textContent: w }))));
 }
 
 function setStatus(text, isError = false) {
@@ -189,6 +198,7 @@ function render(pack, base) {
   $("zip").href = `/api/runs/${current}/zip`;
   $("bar").hidden = false;
   $("grid").replaceChildren(...items.map((item) => card(item, base)));
+  setWarnings(pack.warnings);
   setStatus(items.length ? "" : "No items found: try a closer photo.");
 }
 
@@ -197,6 +207,7 @@ async function follow(runId) {
     const response = await fetch(`/api/runs/${runId}`);
     const run = await response.json();
     if (run.status === "done") { document.title = "✓ Off My Shelf"; return show(run); }
+    setWarnings(run.warnings);
     if (run.status === "error") { document.title = "⚠ Off My Shelf"; return setStatus(run.error, true); }
     document.title = run.items_total
       ? `(${run.items_done}/${run.items_total}) Off My Shelf` : "… Off My Shelf";
@@ -227,56 +238,83 @@ async function start(event) {
   }
 }
 
-async function callAgent(fields, voice = null) {
+async function postForm(url, body) {
+  const response = await fetch(url, { method: "POST", body });
+  const text = await response.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = { detail: text }; }
+  if (!response.ok) {
+    const detail = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+    throw new Error(detail || `${response.status} ${response.statusText}`);
+  }
+  return data;
+}
+
+async function callAgent(fields) {
   const body = new FormData();
   Object.entries(fields).forEach(([key, value]) => body.append(key, value));
-  if (voice) body.append("voice", voice, "goal.wav");
   $("agent-out").textContent = "The agent is working…";
-  const response = await fetch(`/api/runs/${current}/agent`, { method: "POST", body });
-  const data = await response.json();
-  if (!response.ok) { $("agent-out").textContent = data.detail || "Agent failed"; return; }
-  const list = el("ul", {}, data.actions.map((action) => el("li", { textContent: action })));
-  $("agent-out").replaceChildren(el("div", { textContent: data.summary }), list);
-  render(data.pack, `/runs/${current}/pack/`);
+  try {
+    const data = await postForm(`/api/runs/${current}/agent`, body);
+    const list = el("ul", {}, data.actions.map((action) => el("li", { textContent: action })));
+    $("agent-out").replaceChildren(el("div", { textContent: data.summary }), list);
+    render(data.pack, `/runs/${current}/pack/`);
+  } catch (error) {
+    $("agent-out").textContent = `Agent failed: ${error.message}`;
+  }
 }
 
-// Microphone -> 16-bit PCM WAV in the browser (the server resamples to what the API needs).
+// Microphone -> the browser's own recorder (WebM/Ogg/MP4) -> server decodes and transcribes ->
+// goal box -> agent. No hand-made audio encoding in the page.
+const MAX_RECORD_S = 60;
+const AUDIO_EXT = { webm: "webm", ogg: "ogg", mp4: "m4a", mpeg: "mp3", wav: "wav" };
 let recorder = null;
-async function toggleMic() {
-  if (recorder) {
-    const { stream, context, node, chunks } = recorder;
-    recorder = null;
-    node.disconnect(); stream.getTracks().forEach((t) => t.stop());
-    $("mic").textContent = "Speak instead"; $("mic").className = "ghost";
-    const wav = encodeWav(chunks, context.sampleRate);
-    await context.close();
-    return callAgent({ goal: $("goal").value }, wav);
-  }
+
+async function startMic() {
+  if (!window.MediaRecorder) throw new Error("this browser cannot record audio; type the goal");
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const context = new AudioContext();
-  const source = context.createMediaStreamSource(stream);
-  const node = context.createScriptProcessor(4096, 1, 1);
+  const media = new MediaRecorder(stream);
   const chunks = [];
-  node.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-  source.connect(node); node.connect(context.destination);
-  recorder = { stream, context, node, chunks };
+  const started = Date.now();
+  media.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  const stopped = new Promise((resolve) => (media.onstop = resolve));
+  media.start(250);
+  const tick = setInterval(() => {
+    const seconds = Math.round((Date.now() - started) / 1000);
+    $("agent-out").textContent = `Listening… ${seconds} s (say your goal, then press Stop)`;
+    if (seconds >= MAX_RECORD_S) stopMic().catch(showMicError);
+  }, 500);
+  recorder = { stream, media, chunks, stopped, tick };
   $("mic").textContent = "Stop and send"; $("mic").className = "rec";
+  $("agent-out").textContent = "Listening…";
 }
 
-function encodeWav(chunks, rate) {
-  const length = chunks.reduce((n, c) => n + c.length, 0);
-  const view = new DataView(new ArrayBuffer(44 + length * 2));
-  const text = (offset, s) => [...s].forEach((ch, i) => view.setUint8(offset + i, ch.charCodeAt(0)));
-  text(0, "RIFF"); view.setUint32(4, 36 + length * 2, true); text(8, "WAVE"); text(12, "fmt ");
-  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
-  view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true);
-  view.setUint16(32, 2, true); view.setUint16(34, 16, true); text(36, "data");
-  view.setUint32(40, length * 2, true);
-  let offset = 44;
-  for (const chunk of chunks) for (const sample of chunk) {
-    view.setInt16(offset, Math.max(-1, Math.min(1, sample)) * 0x7fff, true); offset += 2;
-  }
-  return new Blob([view], { type: "audio/wav" });
+async function stopMic() {
+  if (!recorder) return;
+  const { stream, media, chunks, stopped, tick } = recorder;
+  recorder = null;
+  clearInterval(tick);
+  media.stop();
+  await stopped;
+  stream.getTracks().forEach((t) => t.stop());
+  $("mic").textContent = "Speak instead"; $("mic").className = "ghost";
+  const type = media.mimeType || chunks[0]?.type || "audio/webm";
+  const blob = new Blob(chunks, { type });
+  if (!blob.size) throw new Error("the microphone sent no audio: check the input device");
+  const ext = AUDIO_EXT[type.split("/")[1]?.split(";")[0]] || "webm";
+  $("agent-out").textContent = "Transcribing…";
+  const body = new FormData();
+  body.append("voice", blob, `goal.${ext}`);
+  const { transcript } = await postForm("/api/transcribe", body);
+  $("goal").value = transcript;
+  return callAgent({ goal: transcript });
+}
+
+function showMicError(error) {
+  if (recorder) { clearInterval(recorder.tick); recorder.stream.getTracks().forEach((t) => t.stop()); }
+  recorder = null;
+  $("mic").textContent = "Speak instead"; $("mic").className = "ghost";
+  $("agent-out").textContent = `Voice failed: ${error.message}`;
 }
 
 async function init() {
@@ -295,8 +333,7 @@ async function init() {
   $("form").addEventListener("submit", start);
   $("run-agent").addEventListener("click", () => $("goal").value.trim() &&
     callAgent({ goal: $("goal").value.trim() }));
-  $("mic").addEventListener("click", () => toggleMic().catch((e) =>
-    ($("agent-out").textContent = `Microphone unavailable: ${e.message}`)));
+  $("mic").addEventListener("click", () => (recorder ? stopMic() : startMic()).catch(showMicError));
   $("demo").addEventListener("click", async () => {
     const response = await fetch("/api/demo", { method: "POST" });
     await follow((await response.json()).run_id);

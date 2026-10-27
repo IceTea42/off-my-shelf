@@ -134,6 +134,19 @@ class Pipeline:
         self._limit = asyncio.Semaphore(settings.max_concurrency)
         self.items_total = 0
         self.items_done = 0
+        self.warnings: list[str] = []
+
+    def _too_small(self, segment: Segment) -> bool:
+        box = segment.box
+        short_side = min(box.right - box.left, box.bottom - box.top)
+        return (
+            short_side < self.settings.min_item_side_px
+            or int(segment.mask.sum()) < self.settings.min_item_pixels
+        )
+
+    def _warn(self, message: str) -> None:
+        self.warnings.append(message)
+        self.progress(f"warning: {message}")
 
     async def run(
         self, inputs: Sequence[Path], out_dir: Path, language: Language | None = None
@@ -142,6 +155,7 @@ class Pipeline:
         files = collect_inputs(inputs)
         if not files:
             raise ValueError("no supported photos or videos in the inputs")
+        self.warnings = []
         (out_dir / "media").mkdir(parents=True, exist_ok=True)
 
         media_paths: list[str] = []
@@ -149,11 +163,21 @@ class Pipeline:
         for file in files:
             self.progress(f"reading {file.name}")
             for still in stills(file, self.settings.max_image_side_px):
+                min_side = self.settings.min_still_side_px
+                if min(still.image.size) < min_side:
+                    width, height = still.image.size
+                    self._warn(
+                        f"{file.name}: {width}x{height} px is too small (under {min_side} px"
+                        " on a side); use a higher-resolution photo or video"
+                    )
+                    continue
                 media_path = f"media/{still.stem}.jpg"
                 (out_dir / media_path).write_bytes(encode(still.image, "JPEG"))
                 media_paths.append(media_path)
                 found.extend(await self._detect(still, media_path))
 
+        if not media_paths:
+            raise ValueError("every photo or frame was too small: " + "; ".join(self.warnings))
         detections = _merge_duplicates(found)
         self.items_total = len(detections)
         self.progress(f"writing listings for {len(detections)} items")
@@ -168,6 +192,7 @@ class Pipeline:
             created_at=datetime.now(UTC),
             media=media_paths,
             items=_drop_video_repeats(list(items)),
+            warnings=self.warnings,
         )
         save_pack(out_dir, pack)
         self.progress(f"done: {len(pack.items)} items")
@@ -184,11 +209,19 @@ class Pipeline:
             return _best(run.segments), run.call
 
         results = await asyncio.gather(*(segment(p) for p in unique))
-        hits = [
-            (seg, call, slugify(item.short_name or item.phrase))
-            for item, (seg, call) in zip(unique.values(), results, strict=True)
-            if seg is not None
-        ]
+        hits = []
+        for item, (seg, call) in zip(unique.values(), results, strict=True):
+            if seg is None:
+                continue
+            if self._too_small(seg):
+                pixels = int(seg.mask.sum())
+                self._warn(
+                    f"{media_path}: '{item.phrase}' covers only {pixels} px "
+                    f"({seg.box.right - seg.box.left}x{seg.box.bottom - seg.box.top} box), "
+                    "too few pixels to judge it; take a closer photo"
+                )
+                continue
+            hits.append((seg, call, slugify(item.short_name or item.phrase)))
         share = _split_cost(inventory.call, len(hits))
         return [_Found(still, media_path, seg, (share, call), slug) for seg, call, slug in hits]
 

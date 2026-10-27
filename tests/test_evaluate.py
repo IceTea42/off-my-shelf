@@ -54,7 +54,9 @@ def test_score_and_summary(tmp_path: Path) -> None:
 async def test_run_eval_writes_reports(tmp_path: Path) -> None:
     csv_path = _dataset(tmp_path / "data")
     assert load_truth(csv_path)[0].brand is None
-    settings = Settings(_env_file=None, cache_dir=tmp_path / "cache")  # type: ignore[call-arg]
+    settings = Settings(
+        _env_file=None, cache_dir=tmp_path / "cache", min_item_side_px=1, min_item_pixels=1
+    )  # type: ignore[call-arg]
     fake = FakeMetaClient(["desk lamp"])
     cache = DiskCache(settings.cache_dir)
     services = Services(

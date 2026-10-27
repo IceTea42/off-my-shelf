@@ -1,6 +1,6 @@
 """Clients for the Meta Model API and for Muse Spark Open, both on the OpenAI wire protocol."""
 
-from openai import AsyncOpenAI
+from openai import APIStatusError, AsyncOpenAI
 
 from off_my_shelf.config import Settings
 
@@ -37,3 +37,15 @@ def make_open_weights_client(settings: Settings) -> AsyncOpenAI:
         timeout=settings.request_timeout_s,
         max_retries=3,
     )
+
+
+def describe_error(error: Exception) -> str:
+    """What went wrong, with the API's own status, path and error body when there is one."""
+    if isinstance(error, APIStatusError):
+        request_id = error.response.headers.get("x-request-id") or error.request_id or "none"
+        body = error.body if error.body is not None else error.response.text
+        return (
+            f"HTTP {error.status_code} from {error.request.method} {error.request.url.path}: "
+            f"{body} (request id {request_id})"
+        )
+    return f"{type(error).__name__}: {error}"

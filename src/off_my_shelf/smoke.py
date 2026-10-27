@@ -5,7 +5,7 @@ Usage:
     uv run python -m off_my_shelf.smoke sam --image path/to/photo.jpg --phrase mug
     uv run python -m off_my_shelf.smoke vision --image path/to/photo.jpg
     uv run python -m off_my_shelf.smoke image --image path/to/photo.jpg --phrase teapot
-    uv run python -m off_my_shelf.smoke transcribe --audio path/to/note.wav
+    uv run python -m off_my_shelf.smoke transcribe [--audio note.wav]  # default: last kept web note
 """
 
 import argparse
@@ -110,11 +110,14 @@ async def smoke_image(settings: Settings, args: argparse.Namespace) -> None:
 
 
 async def smoke_transcribe(settings: Settings, args: argparse.Namespace) -> None:
-    if args.audio is None:
-        raise SystemExit("--audio path/to/note.wav is required")
+    kept = sorted((settings.cache_dir / "voice").glob("*-api.wav"))  # OMS_DEBUG_VOICE notes
+    audio = args.audio or (kept[-1] if kept else None)
+    if audio is None or not audio.is_file():
+        raise SystemExit("pass --audio path/to/note (wav, webm, m4a…) or set OMS_DEBUG_VOICE=true")
+    print(f"audio: {audio}")
     cache = DiskCache(settings.cache_dir)
     transcriber = Transcriber(make_client(settings), settings.transcribe_model, cache)
-    text, call = await transcriber.transcribe(args.audio.read_bytes())
+    text, call = await transcriber.transcribe(audio.read_bytes())
     print(f"model={settings.transcribe_model} cached={call.cached} latency_ms={call.latency_ms}")
     print(f"transcript: {text!r}")
 
@@ -136,7 +139,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("check", choices=sorted(CHECKS))
     parser.add_argument("--image", type=Path, default=DEFAULT_IMAGE, help="photo for vision checks")
     parser.add_argument("--phrase", default="box", help="noun phrase for the sam check")
-    parser.add_argument("--audio", type=Path, help="WAV file for the transcribe check")
+    parser.add_argument(
+        "--audio",
+        type=Path,
+        help="recording for the transcribe check (default: last kept web note)",
+    )
     args = parser.parse_args(argv)
     asyncio.run(CHECKS[args.check](get_settings(), args))
 

@@ -8,7 +8,9 @@ from off_my_shelf.agent import AgentRequest, run_agent
 from off_my_shelf.config import get_settings
 from off_my_shelf.evaluate import run_eval
 from off_my_shelf.export import export_pack
+from off_my_shelf.mocks import load_pack
 from off_my_shelf.pipeline import Pipeline, build_services
+from off_my_shelf.report import markdown_table
 from off_my_shelf.schema import Language
 
 
@@ -24,6 +26,10 @@ def _run(args: argparse.Namespace) -> None:
 
 def _export(args: argparse.Namespace) -> None:
     print(f"listing pack: {export_pack(args.pack)}")
+
+
+def _costs(args: argparse.Namespace) -> None:
+    print(markdown_table(load_pack(args.pack)))
 
 
 def _agent(args: argparse.Namespace) -> None:
@@ -75,10 +81,16 @@ def main(argv: list[str] | None = None) -> None:
     export.add_argument("pack", type=Path, help="pack folder containing listing_pack.json")
     export.set_defaults(handler=_export)
 
+    costs = commands.add_parser("costs", help="cost and latency per step of a pack (markdown)")
+    costs.add_argument("pack", type=Path, help="pack folder containing listing_pack.json")
+    costs.set_defaults(handler=_costs)
+
     agent = commands.add_parser("agent", help="let the agent act on a pack from a goal")
     agent.add_argument("pack", type=Path, help="pack folder containing listing_pack.json")
     agent.add_argument("goal", nargs="?", help='e.g. "moving Friday: sell fast, donate books"')
-    agent.add_argument("--voice", type=Path, help="WAV voice note with the goal")
+    agent.add_argument(
+        "--voice", type=Path, help="voice note with the goal (wav, webm, ogg, m4a, mp3)"
+    )
     agent.add_argument(
         "--buyer",
         nargs=2,

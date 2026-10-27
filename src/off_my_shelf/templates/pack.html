@@ -39,6 +39,8 @@
   button { margin-top:auto; border:0; border-radius:10px; padding:10px; font:inherit; font-weight:600;
            background:var(--accent); color:#fff; cursor:pointer; }
   button:active { transform:translateY(1px); }
+  .warnings { margin:8px 0 0; padding:8px 12px 8px 28px; border-radius:10px; background:#f9eeda;
+              color:#6b4a00; font-size:14px; }
   footer { max-width:1100px; margin:auto; padding:8px 16px 32px; color:var(--muted); font-size:12px; }
 </style>
 </head>
@@ -48,6 +50,9 @@
   <div class="stats">{{ pack.items|length }} items · {{ counts.sell }} to sell
     (about {{ "%.0f"|format(total_value) }} {{ currency }}) · {{ counts.donate }} to donate ·
     {{ counts.recycle }} to recycle</div>
+  {% if pack.warnings %}
+  <ul class="warnings">{% for warning in pack.warnings %}<li>Skipped: {{ warning }}</li>{% endfor %}</ul>
+  {% endif %}
 </header>
 <main>
 {% for item in pack.items %}

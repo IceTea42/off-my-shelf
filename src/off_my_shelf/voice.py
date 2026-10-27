@@ -1,8 +1,8 @@
-"""Muse Voice Transcribe: spoken notes about an item, as text.
+"""Muse Voice Transcribe: spoken goals and notes, as text.
 
-The API takes 16-bit mono PCM WAV at 16 or 24 kHz, at most 10 minutes. ``to_api_wav`` converts
-any PCM WAV (other rates, stereo, 8/24/32-bit) with the standard library and NumPy only, so no
-ffmpeg install is needed on Windows or Linux.
+The API takes 16-bit mono PCM WAV at 16 or 24 kHz, at most 10 minutes. ``to_api_wav`` decodes
+any common recording (browser WebM/Opus or Ogg, M4A, MP3, any WAV) with PyAV, whose wheels bundle
+FFmpeg, so nothing else needs installing on Windows or Linux.
 """
 
 import io
@@ -11,6 +11,7 @@ import time
 import wave
 from typing import Any
 
+import av
 import numpy as np
 from openai import AsyncOpenAI
 
@@ -20,51 +21,41 @@ from off_my_shelf.schema import ModelCall, PipelineStep
 
 API_RATE = 16_000
 MAX_SECONDS = 600
-LANGUAGE_BIAS = ["English", "French", "Turkish"]
-UNSIGNED_8BIT, PACKED_24BIT = 1, 3
 
 
 class AudioFormatError(ValueError):
-    """The audio is not a PCM WAV file the converter understands."""
+    """The upload is not audio PyAV can decode, or holds no sound."""
 
 
 def to_api_wav(data: bytes) -> bytes:
-    """Any PCM WAV -> 16 kHz mono 16-bit WAV, trimmed to the API's 10-minute limit."""
+    """Any recording -> 16 kHz mono 16-bit WAV, trimmed to the API's 10-minute limit."""
+    resampler = av.AudioResampler(format="s16", layout="mono", rate=API_RATE)
+    chunks: list[np.ndarray[Any, Any]] = []  # s16 frames
     try:
-        with wave.open(io.BytesIO(data)) as source:
-            channels, width = source.getnchannels(), source.getsampwidth()
-            rate = source.getframerate()
-            frames = source.readframes(source.getnframes())
-    except (wave.Error, EOFError) as error:
-        raise AudioFormatError(f"not a PCM WAV file: {error}") from error
-    if width not in {1, 2, 3, 4}:
-        raise AudioFormatError(f"unsupported sample width: {width} bytes")
-
-    if width == PACKED_24BIT:  # widen to 32-bit little-endian
-        raw = np.frombuffer(frames, dtype=np.uint8).reshape(-1, 3)
-        samples = (np.pad(raw, ((0, 0), (1, 0))).view("<i4").ravel() >> 8).astype(np.float64)
-        scale = 2.0**23
-    elif width == UNSIGNED_8BIT:  # 8-bit WAV is unsigned
-        samples = np.frombuffer(frames, dtype=np.uint8).astype(np.float64) - 128.0
-        scale = 128.0
-    else:
-        samples = np.frombuffer(frames, dtype=f"<i{width}").astype(np.float64)
-        scale = 2.0 ** (8 * width - 1)
-    mono = samples.reshape(-1, channels).mean(axis=1) / scale
-
-    target_len = int(len(mono) * API_RATE / rate)
-    if target_len != len(mono):
-        mono = np.interp(np.linspace(0, len(mono) - 1, target_len), np.arange(len(mono)), mono)
-    mono = mono[: API_RATE * MAX_SECONDS]
-    pcm = (np.clip(mono, -1.0, 1.0) * 32767).astype("<i2")
-
+        with av.open(io.BytesIO(data), mode="r") as container:
+            if not container.streams.audio:
+                raise AudioFormatError("the file has no audio track")
+            for frame in container.decode(container.streams.audio[0]):
+                chunks.extend(out.to_ndarray() for out in resampler.resample(frame))
+        chunks.extend(out.to_ndarray() for out in resampler.resample(None))
+    except av.FFmpegError as error:
+        raise AudioFormatError(f"cannot decode the audio: {error}") from error
+    pcm = np.concatenate([c.reshape(-1) for c in chunks]) if chunks else np.zeros(0, "<i2")
+    if pcm.size == 0:
+        raise AudioFormatError("the recording holds no sound")
     out = io.BytesIO()
     with wave.open(out, "wb") as target:
         target.setnchannels(1)
         target.setsampwidth(2)
         target.setframerate(API_RATE)
-        target.writeframes(pcm.tobytes())
+        target.writeframes(pcm[: API_RATE * MAX_SECONDS].astype("<i2").tobytes())
     return out.getvalue()
+
+
+def wav_seconds(wav: bytes) -> float:
+    """Length of a WAV produced by ``to_api_wav``."""
+    with wave.open(io.BytesIO(wav)) as source:
+        return float(source.getnframes() / source.getframerate())
 
 
 class Transcriber:
@@ -75,13 +66,12 @@ class Transcriber:
         self.model = model
         self.cache = cache
 
-    async def transcribe(self, wav: bytes) -> tuple[str, ModelCall]:
-        audio = to_api_wav(wav)
+    async def transcribe(self, recording: bytes) -> tuple[str, ModelCall]:
+        audio = to_api_wav(recording)
         request = {
             "model": self.model,
             "audioEncoding": "WAV",
-            "mode": "PUSH_TO_TALK",
-            "languageBias": LANGUAGE_BIAS,
+            "mode": "PUSH_TO_TALK",  # language auto-detected (25 incl. English, French, Turkish)
         }
         key = cache_key("transcribe", request, audio)
         cached = self.cache.get_json(key)

@@ -614,6 +614,14 @@
       },
       "title": "Items",
       "type": "array"
+    },
+    "warnings": {
+      "description": "Inputs or items skipped, and why, for the person",
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
     }
   },
   "required": [

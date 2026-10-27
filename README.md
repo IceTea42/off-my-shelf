@@ -5,7 +5,7 @@
 **Film the things you no longer use. Get ready-to-post listings, sorted into sell, donate and
 recycle.**
 
-Live demo: _URL coming in S3_ · Demo video: _coming in S5_
+Live demo: _URL coming in S3 (see [docs/deploy.md](docs/deploy.md))_ · Demo video: _coming in S5_
 
 Off My Shelf turns a photo or a short video of a shelf into one listing per item: what it is,
 its condition, a fair second-hand price, a title and description in English, French or Turkish,
@@ -30,9 +30,13 @@ flowchart LR
     A[Photos or video] --> B[Keyframes<br/>sharpest stills]
     B --> C[Muse Spark<br/>scene inventory]
     C -->|one noun phrase per item| D[SAM 3.1<br/>boxes + masks]
-    D --> E[Crops + cut-outs]
+    D --> E[Crops + masks]
     E --> F[Muse Spark<br/>structured listing]
-    E --> G[Muse Image<br/>product shot]
+    E --> G[Studio shot<br/>real pixels only]
+    G -->|item partly hidden| L[Muse Image<br/>fills hidden parts only]
+    L --> M{Pixel lock + drift<br/>+ Muse Spark check}
+    M -->|same item, no new defects| H
+    M -->|rejected| G
     F --> H[(Listing pack<br/>JSON + HTML + zip)]
     G --> H
     I[Typed or spoken goal<br/>Voice Transcribe] --> J[Shelf agent<br/>Muse Spark tool calls]
@@ -42,9 +46,9 @@ flowchart LR
 
 | Meta model | What it does here |
 | --- | --- |
-| **Muse Spark 1.3** | Lists the items in each photo; writes each listing as schema-checked JSON; drives the agent's tool calls |
+| **Muse Spark 1.3** | Lists the items in each photo; writes each listing as schema-checked JSON; rejects completed shots that changed the item; drives the agent's tool calls |
 | **SAM 3.1** | Finds and masks each listed item from its noun phrase |
-| **Muse Image 1.0** | Turns each cut-out into a clean product shot, keeping real wear and defects |
+| **Muse Image 1.0** | Completes only the hidden parts of a partly covered item; every visible pixel stays the photo's own |
 | **Muse Voice Transcribe 1.0** | Turns a spoken goal ("sell fast, donate the books") into text for the agent |
 | **Muse Spark Open** (optional) | Runs the listing step on open weights at a partner endpoint (`OMS_USE_SPARK_OPEN=true`) |
 
@@ -58,6 +62,7 @@ uv run off-my-shelf run photos/ --out packs/shelf --lang fr   # photos or videos
 uv run off-my-shelf agent packs/shelf "moving Friday: sell fast, donate the books"
 uv run off-my-shelf agent packs/shelf --buyer item-001 "Would you take 5 euros?"
 uv run off-my-shelf export packs/shelf                        # HTML page + zip
+uv run off-my-shelf costs packs/shelf                         # cost + latency per step
 uv run off-my-shelf eval data/eval/items.csv                  # mini eval report
 uv run python -m off_my_shelf.smoke spark                     # one live call per model
 ```
@@ -67,16 +72,13 @@ uv run python -m off_my_shelf.smoke spark                     # one live call pe
 - Buyer replies are drafts: the agent cannot send anything, a person approves each one.
 - Every agent action is checked before it applies: a reply is rejected if it goes below the
   item's floor price or moves contact or payment off the marketplace, and the agent is told why.
-- AI product shots are labelled as such, next to the real photo of the actual item.
+- Product shots are built from the photo's own pixels. When part of an item is hidden, only
+  that part is AI-completed, the shot is labelled as such, and it is dropped if the model moved
+  the item, added an object or invented (or hid) damage.
 
 ## Cost and latency per item
 
-| Step | Model | Cost per item (list price) | Latency |
-| --- | --- | --- | --- |
-| Inventory (shared by items in a photo) | Muse Spark | _to measure_ | _to measure_ |
-| Segmentation | SAM 3.1 | $0.0025 per phrase | _to measure_ |
-| Listing | Muse Spark | _to measure_ | _to measure_ |
-| Product shot | Muse Image | $0.01 | _to measure_ |
+_Filled from a real run with `uv run off-my-shelf costs packs/<run>` (S7)._
 
 ## Evaluation
 

@@ -49,9 +49,17 @@ class Settings(BaseSettings):
     runs_dir: Path = Path("packs/web")
     host: str = "127.0.0.1"
     port: int = 8000
+    # Debug only: keep every voice note (upload, API WAV, outcome) under <cache_dir>/voice
+    debug_voice: bool = False
+    # Public deployments: refuse new live work once this much (list price, USD) is spent
+    budget_usd: float | None = Field(default=None, gt=0)
 
     # Bounds that keep each call small and cheap
     max_image_side_px: int = Field(default=1280, ge=256)
+    # Too little detail to list: photos/frames and items below these are skipped with a warning
+    min_still_side_px: int = Field(default=320, ge=1)
+    min_item_side_px: int = Field(default=40, ge=1)  # shortest side of the item's box
+    min_item_pixels: int = Field(default=2500, ge=1)  # mask area, about 50 x 50
     # Reasoning tokens count toward the output budget, so this leaves room for thinking.
     max_output_tokens: int = Field(default=8000, ge=256)
     # Muse Spark reasoning depth: minimal | low | medium | high | xhigh ("none" is rejected)

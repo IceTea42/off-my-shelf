@@ -13,7 +13,9 @@ repository, and `git log --reverse` shows the work in the order it was done.
 | Pipeline and CLI (photos, videos, keyframes) | `pipeline.py`, `media.py`, `cli.py` | Muse Spark, SAM 3.1 |
 | Listing pack (product shots, voice notes, HTML/zip) | `product_shots.py`, `voice.py`, `export.py` | Muse Image, Voice Transcribe |
 | Shelf agent (tool calls, checked actions, buyer replies) | `agent.py` | Muse Spark, Voice Transcribe |
-| Web app | `web.py`, `static/index.html` | all |
+| Web app (voice goals, spending cap) | `web.py`, `static/index.html` | all |
+| Cost and latency report | `report.py` | — |
+| Docs (deploy, tech report) | `docs/` | — |
 | Mini eval | `evaluate.py`, `data/eval/` | Muse Spark, SAM 3.1 |
 | Repo tooling (uv, pre-commit, CI on Windows + Ubuntu, Docker) | `pyproject.toml`, `.github/`, `Dockerfile` | — |
 
