@@ -4,7 +4,7 @@ Usage:
     uv run python -m off_my_shelf.smoke spark
     uv run python -m off_my_shelf.smoke sam --image path/to/photo.jpg --phrase mug
     uv run python -m off_my_shelf.smoke vision --image path/to/photo.jpg
-    uv run python -m off_my_shelf.smoke image --image path/to/photo.jpg
+    uv run python -m off_my_shelf.smoke image --image path/to/photo.jpg --phrase teapot
     uv run python -m off_my_shelf.smoke transcribe --audio path/to/note.wav
 """
 
@@ -15,10 +15,12 @@ from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from off_my_shelf.cache import DiskCache
 from off_my_shelf.config import Settings, get_settings
 from off_my_shelf.costs import token_cost
-from off_my_shelf.imaging import load_image
+from off_my_shelf.imaging import PixelBox, encode, load_image, pixel_lock, studio_canvas
 from off_my_shelf.meta_client import make_client
 from off_my_shelf.mocks import MOCK_PACK_DIR
 from off_my_shelf.product_shots import ProductPhotographer
@@ -88,16 +90,21 @@ async def smoke_vision(settings: Settings, args: argparse.Namespace) -> None:
 
 
 async def smoke_image(settings: Settings, args: argparse.Namespace) -> None:
-    """A product shot of the photo's main item (named by --phrase), saved for a look."""
+    """Hide the centre of the photo, let Muse Image fill it, pixel-lock, save for a look."""
     image = load_image(args.image, settings.max_image_side_px)
+    mask = np.ones((image.height, image.width), dtype=bool)
+    h, w = image.height, image.width
+    mask[h * 2 // 5 : h * 3 // 5, w * 2 // 5 : w * 3 // 5] = False
+    canvas = studio_canvas(image, mask, PixelBox(0, 0, w, h))
     cache = DiskCache(settings.cache_dir)
     photographer = ProductPhotographer(make_client(settings), settings.image_model, cache)
-    shot, call = await photographer.shoot(image, args.phrase, [])
-    out = settings.cache_dir / "smoke_product_shot.jpg"
+    filled, call = await photographer.complete(canvas.to_fill, args.phrase, [])
+    locked, drift = pixel_lock(filled, canvas)
+    out = settings.cache_dir / "smoke_completed.jpg"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_bytes(shot)
+    out.write_bytes(encode(locked, "JPEG"))
     print(
-        f"model={settings.image_model} bytes={len(shot)} cached={call.cached} "
+        f"model={settings.image_model} drift={drift:.3f} cached={call.cached} "
         f"latency_ms={call.latency_ms} -> {out}"
     )
 

@@ -78,27 +78,25 @@ async def test_transcriber_live_then_cached(tmp_path: Path) -> None:
     assert again == text and cached.cached
 
 
-async def test_product_shot_prompt_cache_and_jpeg(tmp_path: Path) -> None:
+async def test_completion_prompt_and_cache(tmp_path: Path) -> None:
     client = FakeMetaClient([])
     cache = DiskCache(tmp_path)
-    item = Image.new("RGB", (40, 30), (200, 0, 0))
+    canvas = Image.new("RGB", (64, 64), "white")
     photographer = ProductPhotographer(client, "muse-image-1.0", cache)  # type: ignore[arg-type]
-    shot, call = await photographer.shoot(item, "white dinner plate", ["chipped rim"], True)
-    assert shot.startswith(b"\xff\xd8") and call.cost_usd == pytest.approx(0.01)
+    filled, call = await photographer.complete(canvas, "white dinner plate", ["chipped rim"])
+    assert filled.size == (64, 64) and call.cost_usd == pytest.approx(0.01)
     prompt = client.image_calls[0]["prompt"]
-    assert "white dinner plate" in prompt and "chipped rim" in prompt and "magenta" in prompt
-    assert client.image_calls[0]["size"] == "1024x1024"
+    assert "white dinner plate" in prompt and "chipped rim" in prompt
+    assert "Fill only the magenta areas" in prompt and "Keep every other pixel" in prompt
 
-    again, cached = await ProductPhotographer(None, "muse-image-1.0", cache).shoot(
-        item, "white dinner plate", ["chipped rim"], True
+    again, cached = await ProductPhotographer(None, "muse-image-1.0", cache).complete(
+        canvas, "white dinner plate", ["chipped rim"]
     )
-    assert again == shot and cached.cached
-    await photographer.shoot(item, "white dinner plate", [], rejected_because="added a dent")
-    retry_prompt = client.image_calls[1]["prompt"]
-    assert retry_prompt.startswith("A previous attempt was rejected: added a dent")
-    assert "magenta" not in retry_prompt and "defects to keep visible: none" in retry_prompt
+    assert cached.cached and again.size == filled.size
+    await photographer.complete(canvas, "white dinner plate", [], rejected_because="a dent")
+    assert client.image_calls[1]["prompt"].startswith("A previous attempt was rejected: a dent")
     with pytest.raises(OfflineCacheMissError):
-        await ProductPhotographer(None, "muse-image-1.0", cache).shoot(item, "other", [])
+        await ProductPhotographer(None, "muse-image-1.0", cache).complete(canvas, "other", [])
 
 
 def test_render_html_escapes_and_summarises() -> None:
@@ -109,7 +107,8 @@ def test_render_html_escapes_and_summarises() -> None:
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;" in html
     assert f"{len(pack.items)} items" in html
-    assert "AI product shot" in html
+    assert "Clean shot, real pixels" in html or "AI-completed" in html
+    assert "data:image/svg+xml,%3Csvg" in html
 
 
 def test_listing_text_has_price_and_tags() -> None:

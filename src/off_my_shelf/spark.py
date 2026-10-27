@@ -197,16 +197,17 @@ Reply with one JSON object only, no prose, in exactly this shape:
 {skeleton}"""
 
 INVENTORY_SYSTEM = """You list the distinct physical items in a photo that someone could sell, \
-donate or recycle. Ignore walls, floors, shelves and furniture that is clearly part of the room \
-unless it is the obvious subject. Return at most {limit} items, largest first. Each phrase is a \
-short English noun phrase a segmentation model can find, unique within the photo.
+donate or recycle, including stands, tables, trays and other movable furniture. Ignore only \
+fixed parts of the room (walls, floors, windows, built-in shelves) and food. Return at most \
+{limit} items, largest first. Each phrase is a short English noun phrase a segmentation model \
+can find, unique within the photo.
 Reply with one JSON object only, no prose, in exactly this shape:
 {skeleton}"""
 
 
-SHOT_CHECK_SYSTEM = """You check AI product photos for a second-hand marketplace. Image 1 is the \
-real photo of one item: {name}. Image 2 is the generated product photo. Parts of the item may be \
-hidden in image 1; completing them naturally is fine. Answer:
+SHOT_CHECK_SYSTEM = """You check AI-completed product photos for a second-hand marketplace. \
+Image 1 is the real item: {name}, with parts hidden behind other objects left blank. Image 2 is \
+the same photo where only those hidden parts were completed. Answer:
 - same_item: is image 2 the same kind of item, with the same shape, colours and materials?
 - extra_objects: does image 2 show any object other than the item?
 - added_defects: does image 2 show damage, dents, stains, dust or dirt that are not visible in \

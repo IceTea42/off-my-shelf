@@ -5,7 +5,6 @@ overlapping detections are merged -> each item crop gets a full Muse Spark listi
 """
 
 import asyncio
-import io
 import re
 import unicodedata
 from collections.abc import Callable, Sequence
@@ -14,11 +13,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from openai import OpenAIError
-from PIL import Image
 
 from off_my_shelf.cache import DiskCache, OfflineCacheMissError
 from off_my_shelf.config import Settings
-from off_my_shelf.imaging import PixelBox, crop, encode, mask_image, shot_input
+from off_my_shelf.imaging import PixelBox, crop, encode, mask_image, pixel_lock, studio_canvas
 from off_my_shelf.media import Still, collect_inputs, stills
 from off_my_shelf.meta_client import make_client, make_open_weights_client
 from off_my_shelf.mocks import save_pack
@@ -38,6 +36,7 @@ from off_my_shelf.spark import SparkAnalyzer, SparkReplyError
 DUPLICATE_IOU = 0.6
 SHOT_ATTEMPTS = 2
 HIDDEN_MIN_SHARE = 0.02  # below this, tiny mask gaps are noise, not occlusion
+MAX_DRIFT = 0.12  # mean visible-pixel change above which a completion redrew the item
 CROP_PADDING = 0.08
 Progress = Callable[[str], None]
 
@@ -133,6 +132,8 @@ class Pipeline:
         self.settings = settings
         self.progress = progress or (lambda _message: None)
         self._limit = asyncio.Semaphore(settings.max_concurrency)
+        self.items_total = 0
+        self.items_done = 0
 
     async def run(
         self, inputs: Sequence[Path], out_dir: Path, language: Language | None = None
@@ -154,6 +155,7 @@ class Pipeline:
                 found.extend(await self._detect(still, media_path))
 
         detections = _merge_duplicates(found)
+        self.items_total = len(detections)
         self.progress(f"writing listings for {len(detections)} items")
         items = await asyncio.gather(
             *(
@@ -206,6 +208,7 @@ class Pipeline:
         async with self._limit:
             analysis = await self.services.spark.analyze(item_crop, language)
         shots, shot_calls = await self._product_shot(stem, found, analysis.value, out_dir)
+        self.items_done += 1
         return Item(
             item_id=item_id,
             detection=Detection(
@@ -227,37 +230,40 @@ class Pipeline:
     async def _product_shot(
         self, stem: str, found: _Found, analysis: ItemAnalysis, out_dir: Path
     ) -> tuple[list[str], list[ModelCall]]:
-        """A checked product shot, or none: a wrong picture is worse than no picture.
+        """Shots built from the photo's real pixels; hidden parts AI-completed when trusted.
 
-        Muse Image draws the shot; Muse Spark compares it with the real crop (same item, no
-        extra objects, no invented damage). One corrected retry is allowed.
+        Always: a studio shot of the real item (no generation). When part of the item is
+        hidden: Muse Image fills only the hidden areas, every visible pixel is restored from the
+        photo, and the result is kept only if the model did not move or redraw the item (drift)
+        and Muse Spark sees no extra object or invented damage. One corrected retry.
         """
+        canvas = studio_canvas(found.still.image, found.segment.mask, _crop_box(found))
+        studio = _save(out_dir, f"shots/{stem}.jpg", encode(canvas.real, "JPEG", quality=92))
         photographer = self.services.photographer
-        if photographer is None:
-            return [], []
-        box = _crop_box(found)
-        real = crop(found.still.image, box)
-        source, hidden_share = shot_input(found.still.image, found.segment.mask, box)
-        name = analysis.identification.name
-        defects = analysis.condition.defects
+        if photographer is None or canvas.hidden_share <= HIDDEN_MIN_SHARE:
+            return [studio], []
+        _save(out_dir, f"inputs/{stem}-to-fill.png", encode(canvas.to_fill, "PNG"))
+        name, defects = analysis.identification.name, analysis.condition.defects
         calls: list[ModelCall] = []
         rejected: str | None = None
         try:
             for _ in range(SHOT_ATTEMPTS):
                 async with self._limit:
-                    shot, call = await photographer.shoot(
-                        source, name, defects, hidden_share > HIDDEN_MIN_SHARE, rejected
+                    generated, call = await photographer.complete(
+                        canvas.to_fill, name, defects, rejected
                     )
-                    calls.append(call)
-                    check = await self.services.spark.check_shot(
-                        real, Image.open(io.BytesIO(shot)), name, defects
-                    )
-                    calls.append(check.call)
+                calls.append(call)
+                locked, drift = pixel_lock(generated, canvas)
+                if drift > MAX_DRIFT:
+                    rejected = f"the item was moved or redrawn (drift {drift:.2f})"
+                    continue
+                async with self._limit:
+                    check = await self.services.spark.check_shot(canvas.real, locked, name, defects)
+                calls.append(check.call)
                 if check.value.passed:
-                    rel = f"shots/{stem}.jpg"
-                    (out_dir / rel).parent.mkdir(parents=True, exist_ok=True)
-                    (out_dir / rel).write_bytes(shot)
-                    return [rel], calls
+                    self.progress(f"{stem}: hidden parts completed (drift {drift:.3f})")
+                    jpeg = encode(locked, "JPEG", quality=92)
+                    return [_save(out_dir, f"shots/{stem}-completed.jpg", jpeg), studio], calls
                 rejected = check.value.reason
         except (
             OpenAIError,
@@ -265,10 +271,15 @@ class Pipeline:
             OfflineCacheMissError,
             SparkReplyError,
         ) as error:
-            self.progress(f"{stem}: no product shot ({type(error).__name__})")
-            return [], calls
-        self.progress(f"{stem}: no product shot (check failed: {rejected})")
-        return [], calls
+            rejected = type(error).__name__
+        self.progress(f"{stem}: real-pixel shot only (completion rejected: {rejected})")
+        return [studio], calls
+
+
+def _save(out_dir: Path, rel: str, data: bytes) -> str:
+    (out_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+    (out_dir / rel).write_bytes(data)
+    return rel
 
 
 def _crop_box(found: _Found) -> PixelBox:

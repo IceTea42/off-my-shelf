@@ -10,6 +10,7 @@ from openai import APIConnectionError
 from PIL import Image
 
 from fakes import SAM_SIZE, SHOT_BAD, SHOT_OK, FakeMetaClient
+from off_my_shelf import pipeline
 from off_my_shelf.cache import DiskCache, OfflineCacheMissError
 from off_my_shelf.cli import main
 from off_my_shelf.config import Settings
@@ -67,13 +68,13 @@ async def test_pipeline_writes_a_valid_pack(tmp_path: Path) -> None:
     item = pack.items[0]
     assert item.analysis.listing.language is Language.TR
     assert pack.media == ["media/shelf.jpg"]
-    assert item.product_shots == ["shots/item-001-lamp.jpg"]
+    assert item.product_shots == ["shots/item-001-lamp.jpg"]  # mask barely occluded: no AI
     for rel in (item.detection.crop_path, item.detection.mask_path, *item.product_shots):
         assert rel is not None and (out / rel).is_file()
     assert (out / pack.media[0]).is_file()
     steps = [c.step.value for c in item.calls]
-    assert steps == ["analyze", "segment", "analyze", "product_shot", "product_shot"]
-    assert client.image_calls[0]["image"][2] == "image/png"
+    assert steps == ["analyze", "segment", "analyze"]
+    assert client.image_calls == []
     assert load_pack(out) == pack
     assert messages[-1] == "done: 1 items"
 
@@ -127,7 +128,10 @@ def test_collect_and_reject_media(tmp_path: Path) -> None:
         stills(tmp_path / "doc.pdf", max_side=512)
 
 
-async def test_failed_product_shot_keeps_the_listing(tmp_path: Path) -> None:
+async def test_failed_product_shot_keeps_the_listing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pipeline, "HIDDEN_MIN_SHARE", 0.0)
     settings = _settings(tmp_path)
     photos = tmp_path / "photos"
     _photo(photos)
@@ -141,11 +145,16 @@ async def test_failed_product_shot_keeps_the_listing(tmp_path: Path) -> None:
     pack = await Pipeline(_services(client, settings), settings, messages.append).run(
         [photos], tmp_path / "out"
     )
-    assert pack.items[0].product_shots == []
-    assert any("no product shot" in m for m in messages)
+    assert pack.items[0].product_shots == ["shots/item-001-lamp.jpg"]
+    assert any(
+        "real-pixel shot only (completion rejected: APIConnectionError)" in m for m in messages
+    )
 
 
-async def test_rejected_shots_are_retried_then_dropped(tmp_path: Path) -> None:
+async def test_rejected_shots_are_retried_then_dropped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pipeline, "HIDDEN_MIN_SHARE", 0.0)
     settings = _settings(tmp_path)
     photos = tmp_path / "photos"
     _photo(photos)
@@ -157,19 +166,47 @@ async def test_rejected_shots_are_retried_then_dropped(tmp_path: Path) -> None:
     )
     assert len(client.image_calls) == 2
     assert client.image_calls[1]["prompt"].startswith("A previous attempt was rejected: dent")
-    assert pack.items[0].product_shots == []
-    assert any("check failed: dent" in m for m in messages)
+    assert pack.items[0].product_shots == ["shots/item-001-plate.jpg"]
+    assert any("completion rejected: dent" in m for m in messages)
 
 
-async def test_second_shot_attempt_can_pass(tmp_path: Path) -> None:
+async def test_second_shot_attempt_can_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pipeline, "HIDDEN_MIN_SHARE", 0.0)
     settings = _settings(tmp_path)
     photos = tmp_path / "photos"
     _photo(photos)
     client = FakeMetaClient(["plate"])
     client.shot_checks = [SHOT_BAD, SHOT_OK]
     pack = await Pipeline(_services(client, settings), settings).run([photos], tmp_path / "out")
-    assert pack.items[0].product_shots == ["shots/item-001-plate.jpg"]
+    assert pack.items[0].product_shots == [
+        "shots/item-001-plate-completed.jpg",
+        "shots/item-001-plate.jpg",
+    ]
     assert pack.items[0].detection.crop_path == "crops/item-001-plate.jpg"
+    assert (tmp_path / "out" / "inputs" / "item-001-plate-to-fill.png").is_file()
+
+
+async def test_redrawn_completion_is_rejected_by_drift(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pipeline, "HIDDEN_MIN_SHARE", 0.0)
+    settings = _settings(tmp_path)
+    photos = tmp_path / "photos"
+    _photo(photos)
+    client = FakeMetaClient(["vase"])
+    client.redraw = True
+    messages: list[str] = []
+    pack = await Pipeline(_services(client, settings), settings, messages.append).run(
+        [photos], tmp_path / "out"
+    )
+    assert len(client.image_calls) == 2
+    assert pack.items[0].product_shots == ["shots/item-001-vase.jpg"]
+    assert any("moved or redrawn" in m for m in messages)
+    assert not any(
+        c["response_format"]["json_schema"]["name"] == "ShotCheck" for c in client.chat_calls
+    )
 
 
 def test_slugify() -> None:

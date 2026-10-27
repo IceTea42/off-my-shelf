@@ -24,9 +24,9 @@ SHOT_OK = '{"same_item": true, "extra_objects": false, "added_defects": false, "
 SHOT_BAD = '{"same_item": true, "extra_objects": false, "added_defects": true, "reason": "dent"}'
 
 
-def webp_bytes(size: tuple[int, int] = (32, 32)) -> bytes:
+def webp_bytes(size: tuple[int, int] = (32, 32), colour: str = "darkred") -> bytes:
     buffer = io.BytesIO()
-    Image.new("RGB", size, "lightgray").save(buffer, "WEBP")
+    Image.new("RGB", size, colour).save(buffer, "WEBP")
     return buffer.getvalue()
 
 
@@ -45,14 +45,23 @@ class FakeMetaClient:
         self.post_calls: list[tuple[str, dict[str, Any]]] = []
         self.transcript = "It works but the cable is a bit worn."
         self.shot_checks = [SHOT_OK]
+        self.redraw = False
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._chat))
         self.responses = SimpleNamespace(create=self._responses)
         self.images = SimpleNamespace(edit=self._image_edit)
 
     async def _image_edit(self, **kwargs: Any) -> SimpleNamespace:  # noqa: ANN401
         self.image_calls.append(kwargs)
-        # A different picture per call, as a real image model would return.
-        data = base64.b64encode(webp_bytes((32 + len(self.image_calls), 32))).decode("ascii")
+        if self.redraw:  # a model that ignores the canvas and draws something else
+            picture = webp_bytes((32 + len(self.image_calls), 32))
+        else:  # a faithful fill: the canvas back, one pixel different per call
+            with Image.open(io.BytesIO(kwargs["image"][1])) as canvas:
+                filled = canvas.convert("RGB")
+            filled.putpixel((0, 0), (len(self.image_calls), 0, 0))
+            buffer = io.BytesIO()
+            filled.save(buffer, "PNG")
+            picture = buffer.getvalue()
+        data = base64.b64encode(picture).decode("ascii")
         return SimpleNamespace(data=[SimpleNamespace(b64_json=data)])
 
     async def post(self, path: str, **kwargs: Any) -> dict[str, Any]:  # noqa: ANN401

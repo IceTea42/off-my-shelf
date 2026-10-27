@@ -42,6 +42,7 @@ class Run:
     status: RunStatus = RunStatus.RUNNING
     messages: list[str] = field(default_factory=list)
     error: str | None = None
+    pipeline: Pipeline | None = None
 
 
 def _save_uploads(files: list[UploadFile], upload_dir: Path) -> None:
@@ -90,6 +91,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 
 def _page_routes(app: FastAPI, state: _State) -> None:
+    @app.get("/favicon.svg")
+    async def favicon_svg() -> FileResponse:
+        return FileResponse(STATIC_DIR / "favicon.svg", media_type="image/svg+xml")
+
+    @app.get("/favicon.ico")
+    async def favicon_ico() -> FileResponse:
+        return FileResponse(STATIC_DIR / "favicon.png", media_type="image/png")
+
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
         return (STATIC_DIR / "index.html").read_text(encoding="utf-8")
@@ -120,6 +129,7 @@ def _run_routes(app: FastAPI, state: _State) -> None:
             state.settings, offline=state.offline, product_shots=product_shots
         )
         pipeline = Pipeline(services, state.settings, progress=run.messages.append)
+        run.pipeline = pipeline
 
         async def work() -> None:
             try:
@@ -157,6 +167,8 @@ def _run_routes(app: FastAPI, state: _State) -> None:
             "status": run.status.value,
             "messages": run.messages[-20:],
             "error": run.error,
+            "items_done": run.pipeline.items_done if run.pipeline else 0,
+            "items_total": run.pipeline.items_total if run.pipeline else 0,
             "pack": pack,
             "base_url": f"/runs/{run_id}/pack/",
         }

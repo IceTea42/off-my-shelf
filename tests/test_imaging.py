@@ -8,15 +8,14 @@ from PIL import Image
 
 from off_my_shelf.imaging import (
     HIDDEN_COLOUR,
-    SHOT_BACKGROUND,
     PixelBox,
     crop,
     data_url,
     encode,
-    flatten,
     load_image,
     mask_image,
-    shot_input,
+    pixel_lock,
+    studio_canvas,
 )
 
 
@@ -46,22 +45,39 @@ def test_encode_and_data_url() -> None:
     assert data_url(data, "PNG").startswith("data:image/png;base64,iVBOR")
 
 
-def test_shot_input_marks_hidden_parts() -> None:
-    image = Image.new("RGB", (10, 10), "blue")
-    mask = np.zeros((10, 10), dtype=bool)
-    mask[2:8, 2:8] = True
-    mask[4:6, 4:6] = False  # a leaf covers the middle of the plate
-    box = PixelBox(1, 1, 9, 9)
-    source, share = shot_input(image, mask, box)
-    assert source.size == (8, 8) and source.mode == "RGB"
-    assert source.getpixel((4, 4)) == HIDDEN_COLOUR
-    assert source.getpixel((2, 2)) == (0, 0, 255)
-    assert source.getpixel((0, 0)) == SHOT_BACKGROUND
-    assert share == pytest.approx(4 / 36)
+def _plate() -> tuple[Image.Image, np.ndarray, PixelBox]:
+    image = Image.new("RGB", (40, 40), (0, 0, 200))
+    mask = np.zeros((40, 40), dtype=bool)
+    mask[10:30, 10:30] = True
+    mask[16:24, 16:24] = False  # a leaf covers the middle of the plate
+    return image, mask, PixelBox(10, 10, 30, 30)
+
+
+def test_studio_canvas_uses_real_pixels_and_marks_hidden_parts() -> None:
+    image, mask, box = _plate()
+    canvas = studio_canvas(image, mask, box, size=100, margin=0.1)
+    assert canvas.real.size == (100, 100) and canvas.real.mode == "RGB"
+    assert canvas.hidden_share == pytest.approx(64 / 400)
+    assert canvas.real.getpixel((15, 15)) == (0, 0, 200)  # real item pixels
+    assert canvas.real.getpixel((50, 50)) == (255, 255, 255)  # hidden part left white
+    assert canvas.to_fill.getpixel((50, 50)) == HIDDEN_COLOUR
+    assert canvas.real.getpixel((2, 2)) == (255, 255, 255)  # background
+    assert canvas.visible.sum() + canvas.hidden.sum() == pytest.approx(80 * 80, rel=0.05)
     assert mask_image(mask).getextrema() == (0, 255)
-    assert crop(image, box).size == (8, 8)
+    assert crop(image, box).size == (20, 20)
 
 
-def test_flatten_removes_transparency() -> None:
-    clear = Image.new("RGBA", (4, 4), (255, 0, 0, 0))
-    assert flatten(clear, (1, 2, 3)).getpixel((0, 0)) == (1, 2, 3)
+def test_pixel_lock_restores_visible_pixels_and_measures_drift() -> None:
+    image, mask, box = _plate()
+    canvas = studio_canvas(image, mask, box, size=100)
+    faithful = canvas.to_fill.copy()
+    faithful.paste((10, 10, 190), (40, 40, 60, 60))  # model fills the hole
+    locked, drift = pixel_lock(faithful, canvas)
+    assert drift == pytest.approx(0.0, abs=0.01)
+    assert locked.getpixel((50, 50)) == (10, 10, 190)  # filled hidden part kept
+    assert locked.getpixel((15, 15)) == (0, 0, 200)  # visible part is the real photo
+
+    redrawn = Image.new("RGB", (512, 512), (200, 120, 40))  # a different object, other size
+    locked, drift = pixel_lock(redrawn, canvas)
+    assert drift > 0.5
+    assert locked.size == (100, 100) and locked.getpixel((15, 15)) == (0, 0, 200)

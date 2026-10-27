@@ -3,6 +3,7 @@
 import zipfile
 from collections import Counter
 from pathlib import Path
+from urllib.parse import quote
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
@@ -10,6 +11,7 @@ from off_my_shelf.mocks import load_pack
 from off_my_shelf.schema import ListingPack, TriageDecision
 
 INDEX_FILENAME = "index.html"
+FAVICON = quote((Path(__file__).parent / "static" / "favicon.svg").read_text(encoding="utf-8"))
 LISTINGS_DIRNAME = "listings"
 
 _env = Environment(
@@ -29,6 +31,7 @@ def render_html(pack: ListingPack) -> str:
         total_value=sum(i.analysis.price.suggested for i in selling),
         currency="/".join(sorted(currencies)),
         lang=pack.items[0].analysis.listing.language.value if pack.items else "en",
+        favicon=FAVICON,
     )
 
 

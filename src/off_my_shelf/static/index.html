@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Off My Shelf</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="alternate icon" href="/favicon.ico" type="image/png">
 <style>
   :root { --bg:#f6f4ef; --card:#fff; --ink:#1d1c1a; --muted:#6b675f; --line:#e4e0d6;
           --sell:#1f7a4d; --donate:#2f5fa7; --recycle:#8a5a12; }
@@ -68,7 +70,7 @@
       <span id="drop-text">Drop photos or videos here, or click to choose</span>
     </label>
     <select id="language" aria-label="Listing language"></select>
-    <label class="muted"><input id="shots" type="checkbox" checked> AI product shots</label>
+    <label class="muted"><input id="shots" type="checkbox" checked> AI-complete hidden parts</label>
     <button id="start" type="submit" disabled>Create listings</button>
     <button id="demo" class="ghost" type="button">Try the demo</button>
   </form>
@@ -119,11 +121,12 @@ function card(item, base) {
   const a = item.analysis;
   const money = (v) => `${Math.round(v)} ${a.price.currency}`;
   const photos = [el("figure", {}, [el("img", { src: base + item.detection.crop_path,
-    alt: a.listing.title, loading: "lazy" }), el("figcaption", { textContent: "Real photo" })])];
+    alt: a.listing.title, loading: "lazy" }), el("figcaption", { textContent: "Original photo" })])];
   if (item.product_shots.length) {
     photos.push(el("figure", {}, [el("img", { src: base + item.product_shots[0],
-      alt: "AI product shot", loading: "lazy" }),
-      el("figcaption", { textContent: "AI product shot" })]));
+      alt: "Product shot", loading: "lazy" }),
+      el("figcaption", { textContent: item.product_shots[0].endsWith("-completed.jpg")
+        ? "Hidden parts AI-completed" : "Clean shot, real pixels" })]));
   }
   const text = `${a.listing.title}\n\n${a.listing.description}\n\n${money(a.price.suggested)}`;
   const copy = el("button", { type: "button", textContent: "Copy listing" });
@@ -193,8 +196,10 @@ async function follow(runId) {
   for (;;) {
     const response = await fetch(`/api/runs/${runId}`);
     const run = await response.json();
-    if (run.status === "done") return show(run);
-    if (run.status === "error") return setStatus(run.error, true);
+    if (run.status === "done") { document.title = "✓ Off My Shelf"; return show(run); }
+    if (run.status === "error") { document.title = "⚠ Off My Shelf"; return setStatus(run.error, true); }
+    document.title = run.items_total
+      ? `(${run.items_done}/${run.items_total}) Off My Shelf` : "… Off My Shelf";
     setStatus(run.messages.at(-1) || "Starting…");
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }

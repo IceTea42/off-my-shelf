@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Off My Shelf · {{ pack.run_id }}</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,{{ favicon }}">
 <style>
   :root { --bg:#f6f4ef; --card:#fff; --ink:#1d1c1a; --muted:#6b675f; --line:#e4e0d6;
           --sell:#1f7a4d; --donate:#2f5fa7; --recycle:#8a5a12; --accent:#1d1c1a; }
@@ -54,10 +55,11 @@
   <article class="card" id="{{ item.item_id }}">
     <div class="photos{% if not item.product_shots %} single{% endif %}">
       <figure><img src="{{ item.detection.crop_path }}" alt="{{ a.listing.title }}" loading="lazy">
-        <figcaption>Real photo</figcaption></figure>
+        <figcaption>Original photo</figcaption></figure>
       {% if item.product_shots %}
       <figure><img src="{{ item.product_shots[0] }}" alt="Product shot" loading="lazy">
-        <figcaption>AI product shot</figcaption></figure>
+        <figcaption>{% if item.product_shots[0].endswith("-completed.jpg") %}Hidden parts
+          AI-completed{% else %}Clean shot, real pixels{% endif %}</figcaption></figure>
       {% endif %}
     </div>
     <div class="body">
@@ -85,7 +87,7 @@
   </article>
 {% endfor %}
 </main>
-<footer>Run {{ pack.run_id }} · made with Off My Shelf · AI product shots are illustrations: the
+<footer>Run {{ pack.run_id }} · made with Off My Shelf · shots use the photo's real pixels; only parts hidden in the photo may be AI-completed, and the
   real photo shows the actual item.</footer>
 <script>
   document.querySelectorAll("button[data-copy]").forEach((button) => {

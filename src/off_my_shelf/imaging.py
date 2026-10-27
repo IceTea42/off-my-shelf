@@ -93,33 +93,88 @@ def mask_image(mask: BoolMask) -> Image.Image:
     return Image.fromarray(mask.astype(np.uint8) * 255)
 
 
-def flatten(image: Image.Image, background: tuple[int, int, int]) -> Image.Image:
-    """RGB image with any transparency composited onto a solid background."""
-    rgba = image.convert("RGBA")
-    base = Image.new("RGBA", rgba.size, (*background, 255))
-    return Image.alpha_composite(base, rgba).convert("RGB")
-
-
-SHOT_BACKGROUND = (235, 235, 235)
 HIDDEN_COLOUR = (255, 0, 255)
+STUDIO_WHITE = (255, 255, 255)
 
 
-def shot_input(image: Image.Image, mask: BoolMask, box: PixelBox) -> tuple[Image.Image, float]:
-    """The item on a plain background, with its hidden parts painted magenta.
+@dataclass(frozen=True, slots=True)
+class StudioCanvas:
+    """An item placed on a square white canvas, built only from the photo's real pixels."""
 
-    Hidden = inside the item's outline (convex hull of its mask) but not visible, i.e. covered
-    by another object. Returns the image and the hidden share of the outline, 0 to 1.
+    real: Image.Image
+    """The item on white with a soft shadow; hidden parts are left white."""
+    to_fill: Image.Image
+    """The same canvas with hidden parts painted magenta, for an image model to complete."""
+    visible: BoolMask
+    hidden: BoolMask
+    hidden_share: float
+    """Hidden share of the item's outline (convex hull of its mask), 0 to 1."""
+
+
+def studio_canvas(
+    image: Image.Image, mask: BoolMask, box: PixelBox, size: int = 1024, margin: float = 0.1
+) -> StudioCanvas:
+    """Centre the masked item on a white square, scaled to fill it, with a soft floor shadow.
+
+    Hidden = inside the item's convex hull but not visible, i.e. covered by another object.
     """
     local = mask[box.top : box.bottom, box.left : box.right].astype(np.uint8)
     hull = np.zeros_like(local)
     points = cv2.findNonZero(local)
     if points is not None:
         cv2.fillConvexPoly(hull, cv2.convexHull(points), 1)
-    hidden = (hull == 1) & (local == 0)
-    pixels = np.array(crop(image.convert("RGB"), box))
-    out = np.empty_like(pixels)
-    out[:] = SHOT_BACKGROUND
-    out[local == 1] = pixels[local == 1]
-    out[hidden] = HIDDEN_COLOUR
-    share = float(hidden.sum() / max(int(hull.sum()), 1))
-    return Image.fromarray(out), share
+    hidden_local = (hull == 1) & (local == 0)
+    share = float(hidden_local.sum() / max(int(hull.sum()), 1))
+
+    scale = size * (1 - 2 * margin) / max(box.right - box.left, box.bottom - box.top)
+    width = max(1, round((box.right - box.left) * scale))
+    height = max(1, round((box.bottom - box.top) * scale))
+    left, top = (size - width) // 2, (size - height) // 2
+
+    def place(layer: np.ndarray) -> BoolMask:
+        resized = cv2.resize(
+            layer.astype(np.uint8), (width, height), interpolation=cv2.INTER_NEAREST
+        )
+        out = np.zeros((size, size), dtype=bool)
+        out[top : top + height, left : left + width] = resized.astype(bool)
+        return out
+
+    visible, hidden = place(local), place(hidden_local)
+    pixels = crop(image.convert("RGB"), box).resize((width, height), Image.Resampling.LANCZOS)
+    item = np.zeros((size, size, 3), dtype=np.uint8)
+    item[top : top + height, left : left + width] = np.array(pixels)
+
+    canvas = np.array(_shadow(size, left, top + height, width), dtype=np.uint8)
+    canvas[visible] = item[visible]
+    to_fill = canvas.copy()
+    to_fill[hidden] = HIDDEN_COLOUR
+    return StudioCanvas(Image.fromarray(canvas), Image.fromarray(to_fill), visible, hidden, share)
+
+
+def _shadow(size: int, left: int, bottom: int, width: int) -> Image.Image:
+    """A white square with a soft elliptical shadow under where the item stands."""
+    shade = np.zeros((size, size), dtype=np.uint8)
+    centre = (left + width // 2, min(size - 1, bottom))
+    axes = (max(1, int(width * 0.42)), max(1, int(size * 0.025)))
+    cv2.ellipse(shade, centre, axes, 0, 0, 360, 70, -1)
+    soft = cv2.GaussianBlur(shade, (0, 0), size * 0.015)
+    white = np.full((size, size, 3), STUDIO_WHITE, dtype=np.int16)
+    return Image.fromarray((white - np.asarray(soft)[..., None]).clip(0, 255).astype(np.uint8))
+
+
+def pixel_lock(generated: Image.Image, canvas: StudioCanvas) -> tuple[Image.Image, float]:
+    """Keep the model's pixels only where the item was hidden; restore every visible pixel.
+
+    Returns the locked image and the drift: mean absolute difference (0 to 1) between the
+    generated and the real pixels on the visible part. A high drift means the model moved or
+    redrew the item, so its completion cannot be trusted.
+    """
+    size = canvas.real.size
+    out = np.array(generated.convert("RGB").resize(size, Image.Resampling.LANCZOS))
+    real = np.array(canvas.real)
+    drift = 1.0
+    if canvas.visible.any():
+        diff = np.abs(out.astype(np.int16) - real.astype(np.int16))
+        drift = float(diff[canvas.visible].mean() / 255)
+    out[canvas.visible] = real[canvas.visible]
+    return Image.fromarray(out), drift

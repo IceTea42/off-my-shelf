@@ -44,7 +44,9 @@ def test_page_config_and_demo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv("META_API_KEY", raising=False)
     monkeypatch.delenv("MODEL_API_KEY", raising=False)
     with TestClient(web.create_app(_settings(tmp_path))) as client:
-        assert "Off My Shelf" in client.get("/").text
+        assert 'href="/favicon.svg"' in client.get("/").text
+        assert client.get("/favicon.svg").headers["content-type"].startswith("image/svg+xml")
+        assert client.get("/favicon.ico").headers["content-type"] == "image/png"
         config = client.get("/api/config").json()
         assert config["offline"] is True and config["default_language"] == "en"
 
@@ -83,6 +85,7 @@ def test_upload_runs_the_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         assert response.status_code == 202
         run = _wait(client, response.json()["run_id"])
         assert run["status"] == "done", run["error"]
+        assert run["items_done"] == run["items_total"] == 1
         pack = run["pack"]
         assert isinstance(pack, dict)
         assert pack["items"][0]["analysis"]["listing"]["language"] == "fr"
