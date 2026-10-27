@@ -1,0 +1,627 @@
+{
+  "$defs": {
+    "BoundingBox": {
+      "additionalProperties": false,
+      "description": "Normalised to the source image or frame size: (0, 0) is top-left, (1, 1) bottom-right.",
+      "properties": {
+        "x0": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "X0",
+          "type": "number"
+        },
+        "y0": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Y0",
+          "type": "number"
+        },
+        "x1": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "X1",
+          "type": "number"
+        },
+        "y1": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Y1",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x0",
+        "y0",
+        "x1",
+        "y1"
+      ],
+      "title": "BoundingBox",
+      "type": "object"
+    },
+    "BuyerReply": {
+      "additionalProperties": false,
+      "description": "Sell-me-softly draft: never sent until a human approves it.",
+      "properties": {
+        "buyer_message": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Buyer Message",
+          "type": "string"
+        },
+        "draft_reply": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Draft Reply",
+          "type": "string"
+        },
+        "approved": {
+          "default": false,
+          "title": "Approved",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "buyer_message",
+        "draft_reply"
+      ],
+      "title": "BuyerReply",
+      "type": "object"
+    },
+    "Category": {
+      "enum": [
+        "electronics",
+        "books_media",
+        "home_kitchen",
+        "furniture",
+        "clothing",
+        "kids_toys",
+        "sports_outdoor",
+        "tools_diy",
+        "other"
+      ],
+      "title": "Category",
+      "type": "string"
+    },
+    "Condition": {
+      "additionalProperties": false,
+      "properties": {
+        "grade": {
+          "$ref": "#/$defs/ConditionGrade"
+        },
+        "defects": {
+          "default": [],
+          "items": {
+            "maxLength": 300,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Defects",
+          "type": "array"
+        }
+      },
+      "required": [
+        "grade"
+      ],
+      "title": "Condition",
+      "type": "object"
+    },
+    "ConditionGrade": {
+      "enum": [
+        "new",
+        "like_new",
+        "good",
+        "fair",
+        "poor",
+        "broken"
+      ],
+      "title": "ConditionGrade",
+      "type": "string"
+    },
+    "Detection": {
+      "additionalProperties": false,
+      "description": "SAM 3.1 output for one item.",
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/SourceRef"
+        },
+        "bbox": {
+          "$ref": "#/$defs/BoundingBox"
+        },
+        "score": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Score",
+          "type": "number"
+        },
+        "crop_path": {
+          "minLength": 1,
+          "title": "Crop Path",
+          "type": "string"
+        },
+        "mask_path": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mask Path"
+        }
+      },
+      "required": [
+        "source",
+        "bbox",
+        "score",
+        "crop_path"
+      ],
+      "title": "Detection",
+      "type": "object"
+    },
+    "Identification": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "brand": {
+          "anyOf": [
+            {
+              "maxLength": 60,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Brand"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "maxLength": 60,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "confidence": {
+          "description": "Model's confidence in the identification, 0 to 1.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "category",
+        "confidence"
+      ],
+      "title": "Identification",
+      "type": "object"
+    },
+    "Item": {
+      "additionalProperties": false,
+      "properties": {
+        "item_id": {
+          "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+          "title": "Item Id",
+          "type": "string"
+        },
+        "detection": {
+          "$ref": "#/$defs/Detection"
+        },
+        "analysis": {
+          "$ref": "#/$defs/ItemAnalysis"
+        },
+        "pricing_mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PricingMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "product_shots": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Product Shots",
+          "type": "array"
+        },
+        "voice_note": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Voice Note"
+        },
+        "buyer_replies": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/BuyerReply"
+          },
+          "title": "Buyer Replies",
+          "type": "array"
+        },
+        "calls": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ModelCall"
+          },
+          "title": "Calls",
+          "type": "array"
+        }
+      },
+      "required": [
+        "item_id",
+        "detection",
+        "analysis"
+      ],
+      "title": "Item",
+      "type": "object"
+    },
+    "ItemAnalysis": {
+      "additionalProperties": false,
+      "description": "One item as analysed by Muse Spark; its JSON Schema is the structured-output format.",
+      "properties": {
+        "identification": {
+          "$ref": "#/$defs/Identification"
+        },
+        "condition": {
+          "$ref": "#/$defs/Condition"
+        },
+        "price": {
+          "$ref": "#/$defs/PriceEstimate"
+        },
+        "listing": {
+          "$ref": "#/$defs/ListingText"
+        },
+        "triage": {
+          "$ref": "#/$defs/Triage"
+        }
+      },
+      "required": [
+        "identification",
+        "condition",
+        "price",
+        "listing",
+        "triage"
+      ],
+      "title": "ItemAnalysis",
+      "type": "object"
+    },
+    "Language": {
+      "enum": [
+        "fr",
+        "en",
+        "tr"
+      ],
+      "title": "Language",
+      "type": "string"
+    },
+    "ListingText": {
+      "additionalProperties": false,
+      "properties": {
+        "language": {
+          "$ref": "#/$defs/Language",
+          "default": "fr"
+        },
+        "title": {
+          "maxLength": 80,
+          "minLength": 3,
+          "title": "Title",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "maxLength": 30,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Tags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "title",
+        "description",
+        "tags"
+      ],
+      "title": "ListingText",
+      "type": "object"
+    },
+    "ModelCall": {
+      "additionalProperties": false,
+      "description": "Provenance of one model call: feeds the cost and latency table.",
+      "properties": {
+        "step": {
+          "$ref": "#/$defs/PipelineStep"
+        },
+        "model": {
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "cache_key": {
+          "minLength": 1,
+          "title": "Cache Key",
+          "type": "string"
+        },
+        "cached": {
+          "default": false,
+          "title": "Cached",
+          "type": "boolean"
+        },
+        "input_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Tokens"
+        },
+        "output_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Tokens"
+        },
+        "cost_usd": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cost Usd"
+        },
+        "latency_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Latency Ms"
+        }
+      },
+      "required": [
+        "step",
+        "model",
+        "cache_key"
+      ],
+      "title": "ModelCall",
+      "type": "object"
+    },
+    "PipelineStep": {
+      "enum": [
+        "segment",
+        "analyze",
+        "product_shot",
+        "transcribe",
+        "triage",
+        "buyer_reply",
+        "ad"
+      ],
+      "title": "PipelineStep",
+      "type": "string"
+    },
+    "PriceEstimate": {
+      "additionalProperties": false,
+      "properties": {
+        "currency": {
+          "default": "EUR",
+          "pattern": "^[A-Z]{3}$",
+          "title": "Currency",
+          "type": "string"
+        },
+        "low": {
+          "minimum": 0.0,
+          "title": "Low",
+          "type": "number"
+        },
+        "suggested": {
+          "minimum": 0.0,
+          "title": "Suggested",
+          "type": "number"
+        },
+        "high": {
+          "minimum": 0.0,
+          "title": "High",
+          "type": "number"
+        },
+        "rationale": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "low",
+        "suggested",
+        "high",
+        "rationale"
+      ],
+      "title": "PriceEstimate",
+      "type": "object"
+    },
+    "PricingMode": {
+      "enum": [
+        "sell_fast",
+        "max_value"
+      ],
+      "title": "PricingMode",
+      "type": "string"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "media": {
+          "minLength": 1,
+          "title": "Media",
+          "type": "string"
+        },
+        "frame_index": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Frame Index"
+        },
+        "timestamp_s": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timestamp S"
+        }
+      },
+      "required": [
+        "media"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    },
+    "Triage": {
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/TriageDecision"
+        },
+        "reason": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision",
+        "reason"
+      ],
+      "title": "Triage",
+      "type": "object"
+    },
+    "TriageDecision": {
+      "enum": [
+        "sell",
+        "donate",
+        "recycle"
+      ],
+      "title": "TriageDecision",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "run_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "media": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Media",
+      "type": "array"
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/Item"
+      },
+      "title": "Items",
+      "type": "array"
+    }
+  },
+  "required": [
+    "run_id",
+    "created_at",
+    "media",
+    "items"
+  ],
+  "title": "ListingPack",
+  "type": "object"
+}

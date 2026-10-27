@@ -1,0 +1,253 @@
+{
+  "$defs": {
+    "Category": {
+      "enum": [
+        "electronics",
+        "books_media",
+        "home_kitchen",
+        "furniture",
+        "clothing",
+        "kids_toys",
+        "sports_outdoor",
+        "tools_diy",
+        "other"
+      ],
+      "title": "Category",
+      "type": "string"
+    },
+    "Condition": {
+      "additionalProperties": false,
+      "properties": {
+        "grade": {
+          "$ref": "#/$defs/ConditionGrade"
+        },
+        "defects": {
+          "default": [],
+          "items": {
+            "maxLength": 300,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Defects",
+          "type": "array"
+        }
+      },
+      "required": [
+        "grade"
+      ],
+      "title": "Condition",
+      "type": "object"
+    },
+    "ConditionGrade": {
+      "enum": [
+        "new",
+        "like_new",
+        "good",
+        "fair",
+        "poor",
+        "broken"
+      ],
+      "title": "ConditionGrade",
+      "type": "string"
+    },
+    "Identification": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "brand": {
+          "anyOf": [
+            {
+              "maxLength": 60,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Brand"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "maxLength": 60,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "category": {
+          "$ref": "#/$defs/Category"
+        },
+        "confidence": {
+          "description": "Model's confidence in the identification, 0 to 1.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "category",
+        "confidence"
+      ],
+      "title": "Identification",
+      "type": "object"
+    },
+    "Language": {
+      "enum": [
+        "fr",
+        "en",
+        "tr"
+      ],
+      "title": "Language",
+      "type": "string"
+    },
+    "ListingText": {
+      "additionalProperties": false,
+      "properties": {
+        "language": {
+          "$ref": "#/$defs/Language",
+          "default": "fr"
+        },
+        "title": {
+          "maxLength": 80,
+          "minLength": 3,
+          "title": "Title",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "maxLength": 30,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 10,
+          "title": "Tags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "title",
+        "description",
+        "tags"
+      ],
+      "title": "ListingText",
+      "type": "object"
+    },
+    "PriceEstimate": {
+      "additionalProperties": false,
+      "properties": {
+        "currency": {
+          "default": "EUR",
+          "pattern": "^[A-Z]{3}$",
+          "title": "Currency",
+          "type": "string"
+        },
+        "low": {
+          "minimum": 0.0,
+          "title": "Low",
+          "type": "number"
+        },
+        "suggested": {
+          "minimum": 0.0,
+          "title": "Suggested",
+          "type": "number"
+        },
+        "high": {
+          "minimum": 0.0,
+          "title": "High",
+          "type": "number"
+        },
+        "rationale": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Rationale",
+          "type": "string"
+        }
+      },
+      "required": [
+        "low",
+        "suggested",
+        "high",
+        "rationale"
+      ],
+      "title": "PriceEstimate",
+      "type": "object"
+    },
+    "Triage": {
+      "additionalProperties": false,
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/TriageDecision"
+        },
+        "reason": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "decision",
+        "reason"
+      ],
+      "title": "Triage",
+      "type": "object"
+    },
+    "TriageDecision": {
+      "enum": [
+        "sell",
+        "donate",
+        "recycle"
+      ],
+      "title": "TriageDecision",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "One item as analysed by Muse Spark; its JSON Schema is the structured-output format.",
+  "properties": {
+    "identification": {
+      "$ref": "#/$defs/Identification"
+    },
+    "condition": {
+      "$ref": "#/$defs/Condition"
+    },
+    "price": {
+      "$ref": "#/$defs/PriceEstimate"
+    },
+    "listing": {
+      "$ref": "#/$defs/ListingText"
+    },
+    "triage": {
+      "$ref": "#/$defs/Triage"
+    }
+  },
+  "required": [
+    "identification",
+    "condition",
+    "price",
+    "listing",
+    "triage"
+  ],
+  "title": "ItemAnalysis",
+  "type": "object"
+}
