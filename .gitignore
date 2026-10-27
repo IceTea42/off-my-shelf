@@ -1,0 +1,45 @@
+# --- Python / uv ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.python-version.local
+
+# --- Tooling caches ---
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- Secrets: only .env.example is tracked ---
+.env
+.env.*
+!.env.example
+
+# --- Project data: API cache, raw footage, generated packs ---
+.cache/
+data/raw/
+outputs/
+
+# --- Media (raw footage never goes in git; small demo assets go under assets/ explicitly) ---
+*.mp4
+*.mov
+*.MOV
+*.heic
+*.HEIC
+!assets/**
+
+# --- Notebooks checkpoints ---
+.ipynb_checkpoints/
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
