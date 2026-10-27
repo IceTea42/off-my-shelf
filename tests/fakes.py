@@ -60,7 +60,9 @@ class FakeMetaClient:
         name = kwargs["response_format"]["json_schema"]["name"]
         content = self.inventory_json if name == "SceneInventory" else ANALYSIS_JSON
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content=content), finish_reason="stop")
+            ],
             usage=SimpleNamespace(prompt_tokens=800, completion_tokens=300),
         )
 

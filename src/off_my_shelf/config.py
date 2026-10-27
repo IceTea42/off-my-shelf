@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     # Bounds that keep each call small and cheap
     max_image_side_px: int = Field(default=1280, ge=256)
     # Reasoning tokens count toward the output budget, so this leaves room for thinking.
-    max_output_tokens: int = Field(default=4000, ge=256)
+    max_output_tokens: int = Field(default=8000, ge=256)
     request_timeout_s: float = Field(default=120.0, gt=0)
     max_concurrency: int = Field(default=4, ge=1)
 

@@ -1,5 +1,6 @@
 """Muse Spark structured calls: schema shaping, validation, repair, cache and language."""
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -14,7 +15,11 @@ from off_my_shelf.spark import (
     SceneInventory,
     SparkAnalyzer,
     SparkReplyError,
+    fit,
+    json_skeleton,
+    parse_reply,
     strict_json_schema,
+    wire_schema,
 )
 
 VALID = load_mock_pack().items[0].analysis.model_dump_json()
@@ -29,7 +34,9 @@ class _FakeCompletions:
         self.calls.append(kwargs)
         content = self.replies[len(self.calls) - 1]
         return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+            choices=[
+                SimpleNamespace(message=SimpleNamespace(content=content), finish_reason="stop")
+            ],
             usage=SimpleNamespace(prompt_tokens=1000, completion_tokens=200),
         )
 
@@ -54,6 +61,8 @@ def test_strict_schema_is_flat_and_fully_required() -> None:
     identification = schema["properties"]["identification"]
     assert identification["additionalProperties"] is False
     assert "brand" in identification["required"]
+    # A property literally named "title" must survive annotation stripping.
+    assert "title" in schema["properties"]["listing"]["required"]
 
 
 async def test_analyze_valid_reply_then_offline_cache(tmp_path: Path) -> None:
@@ -86,10 +95,48 @@ async def test_invalid_reply_is_repaired_once(tmp_path: Path) -> None:
     assert result.call.input_tokens == 2000
 
 
-async def test_two_invalid_replies_raise(tmp_path: Path) -> None:
-    analyzer, _ = _analyzer(tmp_path, ["{}", "{}"])
-    with pytest.raises(SparkReplyError):
+async def test_two_invalid_replies_raise_and_are_saved(tmp_path: Path) -> None:
+    analyzer, _ = _analyzer(tmp_path, ["{}", "not json"])
+    with pytest.raises(SparkReplyError, match="failures"):
         await analyzer.analyze(_image(), Language.EN)
+    saved = list((tmp_path / "failures").rglob("*.json"))
+    assert len(saved) == 1
+    assert "not json" in saved[0].read_text(encoding="utf-8")
+
+
+def test_wire_schema_drops_limits_but_keeps_shape() -> None:
+    strict = strict_json_schema(ItemAnalysis)
+    wire = wire_schema(strict)
+    text = json.dumps(wire)
+    assert "maxLength" not in text and "pattern" not in text and "minimum" not in text
+    assert wire["required"] == strict["required"]
+    assert '"enum"' in text
+    skeleton = json_skeleton(wire)
+    assert '"title": string' in skeleton
+    assert '"brand": string | null' in skeleton
+    assert '"decision": "sell" | "donate" | "recycle"' in skeleton
+
+
+def test_fit_trims_to_limits_and_drops_junk() -> None:
+    strict = strict_json_schema(ItemAnalysis)
+    data = json.loads(VALID)
+    data["listing"]["title"] = "A " * 60
+    data["listing"]["tags"] = ["lamp", "ÿýýýýýýý", *[f"t{i}" for i in range(20)]]
+    data["identification"]["confidence"] = 1.7
+    data["identification"]["extra"] = "dropped"
+    fixed = fit(data, strict)
+    assert len(fixed["listing"]["title"]) <= 80
+    assert "ÿýýýýýýý" not in fixed["listing"]["tags"]
+    assert len(fixed["listing"]["tags"]) == 10
+    assert fixed["identification"]["confidence"] == 1.0
+    assert "extra" not in fixed["identification"]
+    ItemAnalysis.model_validate(fixed)
+
+
+def test_parse_reply_accepts_code_fences() -> None:
+    strict = strict_json_schema(ItemAnalysis)
+    value = parse_reply(f"```json\n{VALID}\n```", ItemAnalysis, strict)
+    assert value.listing.title
 
 
 async def test_inventory(tmp_path: Path) -> None:

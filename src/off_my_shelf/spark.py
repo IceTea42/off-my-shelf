@@ -1,9 +1,17 @@
 """Muse Spark structured output: scene inventory and per-item listing analysis.
 
-Every call asks for JSON matching a Pydantic model, validates the reply, and retries once with
-the validation error when the model drifts from the schema. Raw replies are cached by request.
+Live tests showed the endpoint does not always honour the JSON Schema it is given, so a reply
+goes through four defences before it is accepted:
+1. the schema sent on the wire keeps only types, enums and required keys (length and pattern
+   limits are what make constrained decoding emit junk), and the prompt spells the shape out;
+2. the reply is unwrapped from code fences, then trimmed to the real limits (long strings cut
+   at a word, extra list items and unknown keys dropped, numbers clamped, junk tags removed);
+3. if it is still invalid, the model gets one repair turn with the validation errors;
+4. a reply that fails anyway is saved under ``<cache>/failures/`` for inspection.
 """
 
+import json
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -19,6 +27,13 @@ from off_my_shelf.schema import ItemAnalysis, Language, ModelCall, PipelineStep
 
 MAX_SCENE_ITEMS = 12
 LANGUAGE_NAMES = {Language.EN: "English", Language.FR: "French", Language.TR: "Turkish"}
+CONSTRAINT_KEYS = frozenset(
+    {"maxLength", "minLength", "maxItems", "minItems", "pattern", "minimum", "maximum"}
+    | {"exclusiveMinimum", "exclusiveMaximum"}
+)
+ANNOTATION_KEYS = frozenset({"title", "default"})
+FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
+JUNK_RUN = re.compile(r"(.)\1{3,}")  # a character repeated 4+ times: degenerate decoding
 
 
 class SparkReplyError(RuntimeError):
@@ -44,12 +59,11 @@ class SceneInventory(BaseModel):
     items: list[SceneItem] = Field(max_length=MAX_SCENE_ITEMS)
 
 
-def strict_json_schema(model: type[BaseModel]) -> dict[str, Any]:
-    """The model's JSON Schema with refs inlined, every property required and no extras.
+# --- Schema shaping ------------------------------------------------------------------------
 
-    Structured-output endpoints are strictest about these three points; validation of the
-    reply against the Pydantic model still enforces defaults and value constraints.
-    """
+
+def strict_json_schema(model: type[BaseModel]) -> dict[str, Any]:
+    """The model's JSON Schema with refs inlined, every property required and no extras."""
     schema = model.model_json_schema()
     defs: dict[str, Any] = schema.pop("$defs", {})
 
@@ -60,7 +74,9 @@ def strict_json_schema(model: type[BaseModel]) -> dict[str, Any]:
             return node
         if "$ref" in node:
             return walk(defs[node["$ref"].rsplit("/", 1)[-1]])
-        out = {k: walk(v) for k, v in node.items() if k not in {"title", "default"}}
+        out = {k: walk(v) for k, v in node.items() if k not in ANNOTATION_KEYS}
+        if "properties" in node:  # property names are data, never annotations
+            out["properties"] = {name: walk(sub) for name, sub in node["properties"].items()}
         if out.get("type") == "object" and "properties" in out:
             out["required"] = list(out["properties"])
             out["additionalProperties"] = False
@@ -70,11 +86,80 @@ def strict_json_schema(model: type[BaseModel]) -> dict[str, Any]:
     return result
 
 
-@dataclass(frozen=True, slots=True)
-class SparkResult[T: BaseModel]:
-    value: T
-    call: ModelCall
+def wire_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """The schema without value limits: what we ask the endpoint to decode against."""
 
+    def walk(node: Any) -> Any:  # noqa: ANN401
+        if isinstance(node, list):
+            return [walk(child) for child in node]
+        if not isinstance(node, dict):
+            return node
+        out = {k: walk(v) for k, v in node.items() if k not in CONSTRAINT_KEYS}
+        if "properties" in node:  # property names are data, never constraints
+            out["properties"] = {name: walk(sub) for name, sub in node["properties"].items()}
+        return out
+
+    result: dict[str, Any] = walk(schema)
+    return result
+
+
+def json_skeleton(schema: dict[str, Any]) -> str:
+    """A one-line picture of the expected JSON, e.g. {"name": string, "tags": [string]}."""
+
+    def shape(node: dict[str, Any]) -> str:
+        if "anyOf" in node:
+            return " | ".join(shape(option) for option in node["anyOf"])
+        if "enum" in node:
+            return " | ".join(json.dumps(value) for value in node["enum"])
+        kind = node.get("type")
+        if kind == "object":
+            fields = ", ".join(f'"{k}": {shape(v)}' for k, v in node["properties"].items())
+            return "{" + fields + "}"
+        if kind == "array":
+            return f"[{shape(node['items'])}]"
+        return str(kind)
+
+    return shape(schema)
+
+
+def fit(value: Any, schema: dict[str, Any]) -> Any:  # noqa: ANN401, PLR0911
+    """Bring a decoded reply within the schema's limits where that is safe to do."""
+    if "anyOf" in schema:
+        if value is None:
+            return None
+        options = [o for o in schema["anyOf"] if o.get("type") != "null"]
+        return fit(value, options[0]) if len(options) == 1 else value
+    kind = schema.get("type")
+    if kind == "object" and isinstance(value, dict):
+        props = schema.get("properties", {})
+        return {k: fit(v, props[k]) for k, v in value.items() if k in props}
+    if kind == "array" and isinstance(value, list):
+        items = [fit(v, schema["items"]) for v in value]
+        items = [v for v in items if not (isinstance(v, str) and JUNK_RUN.search(v))]
+        return items[: schema["maxItems"]] if "maxItems" in schema else items
+    if kind == "string" and isinstance(value, str):
+        limit = schema.get("maxLength")
+        if limit is not None and len(value) > limit:
+            cut = value[:limit].rsplit(" ", 1)[0] if " " in value[:limit] else value[:limit]
+            return cut.rstrip(" ,;:-")
+        return value
+    if kind in {"number", "integer"} and isinstance(value, int | float):
+        low, high = schema.get("minimum"), schema.get("maximum")
+        if low is not None and value < low:
+            return low
+        if high is not None and value > high:
+            return high
+    return value
+
+
+def parse_reply[T: BaseModel](text: str, model: type[T], schema: dict[str, Any]) -> T:
+    """Unwrap, trim and validate one reply; raises ValidationError or ValueError."""
+    match = FENCE.match(text)
+    data = json.loads(match.group(1) if match else text)
+    return model.model_validate(fit(data, schema))
+
+
+# --- Prompts ---------------------------------------------------------------------------------
 
 ANALYZE_SYSTEM = """You are an expert second-hand reseller in France who writes listings for \
 Vinted, Leboncoin and eBay. You look at one photo of one item and return its listing as JSON.
@@ -83,15 +168,26 @@ Rules:
 - Grade the condition from what you see; list visible defects plainly, never invent any.
 - Price in EUR for the French second-hand market: low = sells within days, high = patient \
 seller; suggested sits between them. Explain the price in one sentence.
-- Write the title and description in {language}; be honest, specific and friendly; no emoji, \
-no ALL CAPS, no contact details. Tags are short search words in {language}.
+- Write the title (at most 80 characters) and description (at most 1,000 characters) in \
+{language}; be honest, specific and friendly; no emoji, no ALL CAPS, no contact details.
+- Tags: up to 8 short search words in {language}.
 - Triage: sell if it is worth more than about 5 EUR and in working order; donate if usable but \
-low value; recycle if broken or unsafe. Give the reason in one sentence."""
+low value; recycle if broken or unsafe. Give the reason in one sentence.
+Reply with one JSON object only, no prose, in exactly this shape:
+{skeleton}"""
 
-INVENTORY_SYSTEM = f"""You list the distinct physical items in a photo that someone could sell, \
+INVENTORY_SYSTEM = """You list the distinct physical items in a photo that someone could sell, \
 donate or recycle. Ignore walls, floors, shelves and furniture that is clearly part of the room \
-unless it is the obvious subject. Return at most {MAX_SCENE_ITEMS} items, largest first. Each \
-phrase is a short English noun phrase a segmentation model can find, unique within the photo."""
+unless it is the obvious subject. Return at most {limit} items, largest first. Each phrase is a \
+short English noun phrase a segmentation model can find, unique within the photo.
+Reply with one JSON object only, no prose, in exactly this shape:
+{skeleton}"""
+
+
+@dataclass(frozen=True, slots=True)
+class SparkResult[T: BaseModel]:
+    value: T
+    call: ModelCall
 
 
 class SparkAnalyzer:
@@ -110,9 +206,8 @@ class SparkAnalyzer:
             {"type": "text", "text": "List the items in this photo."},
             _image_part(image),
         ]
-        return await self._structured(
-            PipelineStep.ANALYZE, INVENTORY_SYSTEM, content, SceneInventory
-        )
+        system = INVENTORY_SYSTEM.format(limit=MAX_SCENE_ITEMS, skeleton=_skeleton(SceneInventory))
+        return await self._structured(PipelineStep.ANALYZE, system, content, SceneInventory)
 
     async def analyze(
         self, crop: Image.Image, language: Language, note: str | None = None
@@ -120,7 +215,9 @@ class SparkAnalyzer:
         text = "Create the listing for this item."
         if note:
             text += f"\nThe owner says: {note}"
-        system = ANALYZE_SYSTEM.format(language=LANGUAGE_NAMES[language])
+        system = ANALYZE_SYSTEM.format(
+            language=LANGUAGE_NAMES[language], skeleton=_skeleton(ItemAnalysis)
+        )
         content = [{"type": "text", "text": text}, _image_part(crop)]
         result = await self._structured(PipelineStep.ANALYZE, system, content, ItemAnalysis)
         if result.value.listing.language is not language:
@@ -140,32 +237,35 @@ class SparkAnalyzer:
             {"role": "system", "content": system},
             {"role": "user", "content": content},
         ]
-        schema = strict_json_schema(schema_model)
-        key = cache_key("spark", self.model, schema_model.__name__, schema, messages)
+        strict = strict_json_schema(schema_model)
+        wire = wire_schema(strict)
+        key = cache_key("spark", self.model, schema_model.__name__, wire, messages)
         cached = self.cache.get_json(key)
         if isinstance(cached, dict):
-            value = schema_model.model_validate_json(str(cached["content"]))
+            value = parse_reply(str(cached["content"]), schema_model, strict)
             return SparkResult(value, self._call(step, key, cached, latency_ms=None))
         client = self.client
         if client is None:
             raise OfflineCacheMissError(step.value, key)
 
         start = time.perf_counter()
-        reply = await self._complete(client, messages, schema_model.__name__, schema)
+        reply = await self._complete(client, messages, schema_model.__name__, wire)
         try:
-            value = schema_model.model_validate_json(reply["content"])
-        except ValidationError as error:
+            value = parse_reply(reply["content"], schema_model, strict)
+        except (ValidationError, ValueError) as error:
             repair = [
                 *messages,
                 {"role": "assistant", "content": reply["content"]},
-                {"role": "user", "content": f"That JSON is invalid: {error}. Return fixed JSON."},
+                {"role": "user", "content": _repair_prompt(error)},
             ]
-            retry = await self._complete(client, repair, schema_model.__name__, schema)
+            retry = await self._complete(client, repair, schema_model.__name__, wire)
+            attempts = [reply, retry]
             reply = _merge_usage(reply, retry)
             try:
-                value = schema_model.model_validate_json(reply["content"])
-            except ValidationError as final_error:
-                raise SparkReplyError(str(final_error)) from final_error
+                value = parse_reply(reply["content"], schema_model, strict)
+            except (ValidationError, ValueError) as final_error:
+                saved = self._save_failure(key, attempts, final_error)
+                raise SparkReplyError(f"{final_error} (replies saved to {saved})") from final_error
         latency_ms = round((time.perf_counter() - start) * 1000)
         self.cache.put_json(key, reply)
         return SparkResult(value, self._call(step, key, reply, latency_ms))
@@ -190,11 +290,20 @@ class SparkAnalyzer:
             max_tokens=self.max_tokens,
         )
         usage = response.usage
+        choice = response.choices[0]
         return {
-            "content": response.choices[0].message.content or "",
+            "content": choice.message.content or "",
+            "finish_reason": choice.finish_reason,
             "input_tokens": usage.prompt_tokens if usage else None,
             "output_tokens": usage.completion_tokens if usage else None,
         }
+
+    def _save_failure(self, key: str, attempts: list[dict[str, Any]], error: Exception) -> str:
+        failure_key = cache_key("failures", key, time.time())
+        self.cache.put_json(
+            failure_key, {"model": self.model, "error": str(error), "replies": attempts}
+        )
+        return str(self.cache.root / "failures")
 
     def _call(
         self, step: PipelineStep, key: str, reply: dict[str, Any], latency_ms: int | None
@@ -213,6 +322,20 @@ class SparkAnalyzer:
             cost_usd=cost,
             latency_ms=latency_ms,
         )
+
+
+def _skeleton(model: type[BaseModel]) -> str:
+    return json_skeleton(wire_schema(strict_json_schema(model)))
+
+
+def _repair_prompt(error: Exception) -> str:
+    if isinstance(error, ValidationError):
+        problems = "; ".join(
+            f"{'.'.join(map(str, e['loc'])) or 'root'}: {e['msg']}" for e in error.errors()[:5]
+        )
+    else:
+        problems = f"not valid JSON ({error})"
+    return f"That reply is invalid: {problems}. Return the complete corrected JSON object only."
 
 
 def _image_part(image: Image.Image) -> dict[str, Any]:
