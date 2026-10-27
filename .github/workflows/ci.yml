@@ -36,6 +36,19 @@ jobs:
       - name: Tests
         run: uv run pytest --cov
 
+  docker:
+    name: docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build
+        run: docker build -t off-my-shelf .
+      - name: Serve and answer
+        run: |
+          docker run -d --name oms -p 7860:7860 off-my-shelf
+          for i in $(seq 1 30); do curl -sf localhost:7860/api/config && exit 0; sleep 1; done
+          docker logs oms; exit 1
+
   secrets:
     name: secret scan
     runs-on: ubuntu-latest

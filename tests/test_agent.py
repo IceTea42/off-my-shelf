@@ -157,6 +157,7 @@ def test_web_agent_and_approval(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         return AgentOutcome(request.goal, ["item-001: reply drafted"], "Drafted one reply.")
 
     monkeypatch.setattr(web, "run_agent", fake_run_agent)
+    monkeypatch.setenv("META_API_KEY", "test-key")
     settings = Settings(  # type: ignore[call-arg]
         _env_file=None, cache_dir=tmp_path / "cache", runs_dir=tmp_path / "runs"
     )
@@ -174,3 +175,16 @@ def test_web_agent_and_approval(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         pack = client.get("/api/runs/demo").json()["pack"]
         assert pack["items"][0]["buyer_replies"][index]["approved"] is True
         assert client.post("/api/runs/demo/items/item-001/replies/99/approve").status_code == 404
+
+
+def test_web_agent_needs_a_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("META_API_KEY", raising=False)
+    monkeypatch.delenv("MODEL_API_KEY", raising=False)
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None, cache_dir=tmp_path / "cache", runs_dir=tmp_path / "runs"
+    )
+    with TestClient(web.create_app(settings)) as client:
+        client.post("/api/demo")
+        response = client.post("/api/runs/demo/agent", data={"goal": "sell fast"})
+        assert response.status_code == 503
+        assert "META_API_KEY" in response.json()["detail"]

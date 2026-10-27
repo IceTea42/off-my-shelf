@@ -180,6 +180,8 @@ def _agent_routes(app: FastAPI, state: _State) -> None:
     ) -> dict[str, Any]:
         """Let the agent act on a finished run from a typed goal, a voice note or a buyer."""
         target = state.finished(run_id)
+        if state.offline:
+            raise HTTPException(503, "The agent needs META_API_KEY in .env (offline mode).")
         request = AgentRequest(
             goal=goal,
             voice=await voice.read() if voice is not None else None,
@@ -188,7 +190,7 @@ def _agent_routes(app: FastAPI, state: _State) -> None:
             ),
         )
         try:
-            outcome = await run_agent(state.settings, target, request, offline=state.offline)
+            outcome = await run_agent(state.settings, target, request)
         except Exception as error:
             raise HTTPException(502, f"{type(error).__name__}: {error}") from error
         return {

@@ -25,6 +25,7 @@ htmlcov/
 data/raw/
 outputs/
 packs/
+reports/
 
 # --- Media (raw footage never goes in git; small demo assets go under assets/ explicitly) ---
 *.mp4

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from off_my_shelf.agent import AgentRequest, run_agent
 from off_my_shelf.config import get_settings
+from off_my_shelf.evaluate import run_eval
 from off_my_shelf.export import export_pack
 from off_my_shelf.pipeline import Pipeline, build_services
 from off_my_shelf.schema import Language
@@ -36,6 +37,15 @@ def _agent(args: argparse.Namespace) -> None:
     for action in outcome.actions:
         print(f"  - {action}")
     print(outcome.summary)
+
+
+def _eval(args: argparse.Namespace) -> None:
+    settings = get_settings()
+    services = build_services(settings, offline=args.offline, product_shots=False)
+    summary = asyncio.run(run_eval(services, settings, args.dataset, args.out))
+    for metric, value in summary.items():
+        print(f"{metric}: {value}")
+    print(f"report: {args.out / 'report.md'}")
 
 
 def _serve(args: argparse.Namespace) -> None:
@@ -78,6 +88,12 @@ def main(argv: list[str] | None = None) -> None:
     )
     agent.add_argument("--offline", action="store_true", help="replay cached steps only")
     agent.set_defaults(handler=_agent)
+
+    evaluation = commands.add_parser("eval", help="score the pipeline on known resale prices")
+    evaluation.add_argument("dataset", type=Path, help="CSV: image,name,brand,price_eur")
+    evaluation.add_argument("--out", type=Path, default=Path("reports/eval"))
+    evaluation.add_argument("--offline", action="store_true", help="use cached results only")
+    evaluation.set_defaults(handler=_eval)
 
     serve = commands.add_parser("serve", help="start the web app")
     serve.add_argument("--host", help="interface, e.g. 0.0.0.0 to share on your network")
