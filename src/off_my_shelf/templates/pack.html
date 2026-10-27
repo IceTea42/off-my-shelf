@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Off My Shelf · {{ pack.run_id }}</title>
+<style>
+  :root { --bg:#f6f4ef; --card:#fff; --ink:#1d1c1a; --muted:#6b675f; --line:#e4e0d6;
+          --sell:#1f7a4d; --donate:#2f5fa7; --recycle:#8a5a12; --accent:#1d1c1a; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { padding:28px 16px 8px; max-width:1100px; margin:auto; }
+  h1 { margin:0; font-size:26px; letter-spacing:-.01em; }
+  .stats { color:var(--muted); margin-top:4px; }
+  main { max-width:1100px; margin:auto; padding:16px; display:grid; gap:16px;
+         grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden;
+          display:flex; flex-direction:column; }
+  .photos { display:grid; grid-template-columns:1fr 1fr; gap:2px; background:var(--line); }
+  .photos.single { grid-template-columns:1fr; }
+  figure { margin:0; position:relative; background:#fafafa; aspect-ratio:1; }
+  figure img { width:100%; height:100%; object-fit:contain; display:block; }
+  figcaption { position:absolute; left:8px; bottom:8px; font-size:11px; background:rgba(0,0,0,.6);
+               color:#fff; padding:2px 6px; border-radius:6px; }
+  .body { padding:14px 16px 16px; display:flex; flex-direction:column; gap:8px; flex:1; }
+  .row { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+  h2 { margin:0; font-size:16px; line-height:1.3; }
+  .price { font-weight:700; font-size:18px; white-space:nowrap; }
+  .range { color:var(--muted); font-size:12px; }
+  .badge { font-size:12px; font-weight:600; padding:2px 8px; border-radius:99px; color:#fff; }
+  .sell { background:var(--sell); } .donate { background:var(--donate); }
+  .recycle { background:var(--recycle); }
+  .meta { color:var(--muted); font-size:13px; }
+  .desc { white-space:pre-line; font-size:14px; }
+  .tags span { display:inline-block; font-size:12px; border:1px solid var(--line); border-radius:99px;
+               padding:1px 8px; margin:0 4px 4px 0; color:var(--muted); }
+  button { margin-top:auto; border:0; border-radius:10px; padding:10px; font:inherit; font-weight:600;
+           background:var(--accent); color:#fff; cursor:pointer; }
+  button:active { transform:translateY(1px); }
+  footer { max-width:1100px; margin:auto; padding:8px 16px 32px; color:var(--muted); font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Off My Shelf</h1>
+  <div class="stats">{{ pack.items|length }} items · {{ counts.sell }} to sell
+    (about {{ "%.0f"|format(total_value) }} {{ currency }}) · {{ counts.donate }} to donate ·
+    {{ counts.recycle }} to recycle</div>
+</header>
+<main>
+{% for item in pack.items %}
+{% set a = item.analysis %}
+  <article class="card" id="{{ item.item_id }}">
+    <div class="photos{% if not item.product_shots %} single{% endif %}">
+      <figure><img src="{{ item.detection.crop_path }}" alt="{{ a.listing.title }}" loading="lazy">
+        <figcaption>Real photo</figcaption></figure>
+      {% if item.product_shots %}
+      <figure><img src="{{ item.product_shots[0] }}" alt="Product shot" loading="lazy">
+        <figcaption>AI product shot</figcaption></figure>
+      {% endif %}
+    </div>
+    <div class="body">
+      <div class="row">
+        <h2>{{ a.listing.title }}</h2>
+        <span class="badge {{ a.triage.decision.value }}">{{ a.triage.decision.value }}</span>
+      </div>
+      <div class="row">
+        <span class="price">{{ "%.0f"|format(a.price.suggested) }} {{ a.price.currency }}</span>
+        <span class="range">{{ "%.0f"|format(a.price.low) }}–{{ "%.0f"|format(a.price.high) }}
+          {{ a.price.currency }}</span>
+      </div>
+      <div class="meta">Condition: {{ a.condition.grade.value.replace("_", " ") }}
+        {% if a.condition.defects %} · {{ a.condition.defects|join(", ") }}{% endif %}</div>
+      <div class="desc">{{ a.listing.description }}</div>
+      <div class="tags">{% for tag in a.listing.tags %}<span>{{ tag }}</span>{% endfor %}</div>
+      <div class="meta">{{ a.triage.reason }}</div>
+      <textarea hidden id="text-{{ item.item_id }}">{{ a.listing.title }}
+
+{{ a.listing.description }}
+
+{{ "%.0f"|format(a.price.suggested) }} {{ a.price.currency }}</textarea>
+      <button type="button" data-copy="text-{{ item.item_id }}">Copy listing</button>
+    </div>
+  </article>
+{% endfor %}
+</main>
+<footer>Run {{ pack.run_id }} · made with Off My Shelf · AI product shots are illustrations: the
+  real photo shows the actual item.</footer>
+<script>
+  document.querySelectorAll("button[data-copy]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const text = document.getElementById(button.dataset.copy).value;
+      try { await navigator.clipboard.writeText(text); button.textContent = "Copied"; }
+      catch { button.textContent = "Select and copy manually"; }
+      setTimeout(() => (button.textContent = "Copy listing"), 1500);
+    });
+  });
+</script>
+</body>
+</html>

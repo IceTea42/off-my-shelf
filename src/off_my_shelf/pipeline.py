@@ -10,12 +10,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from off_my_shelf.cache import DiskCache
+from openai import OpenAIError
+
+from off_my_shelf.cache import DiskCache, OfflineCacheMissError
 from off_my_shelf.config import Settings
-from off_my_shelf.imaging import PixelBox, crop, encode, mask_image
+from off_my_shelf.imaging import PixelBox, crop, cutout, encode, mask_image
 from off_my_shelf.media import Still, collect_inputs, stills
-from off_my_shelf.meta_client import make_client
+from off_my_shelf.meta_client import make_client, make_open_weights_client
 from off_my_shelf.mocks import PACK_FILENAME
+from off_my_shelf.product_shots import EmptyImageResponseError, ProductPhotographer
 from off_my_shelf.sam import SamSegmenter, Segment
 from off_my_shelf.schema import (
     Detection,
@@ -37,15 +40,29 @@ Progress = Callable[[str], None]
 class Services:
     sam: SamSegmenter
     spark: SparkAnalyzer
+    photographer: ProductPhotographer | None = None
 
 
-def build_services(settings: Settings, offline: bool = False) -> Services:
-    """Live services, or cache-only ones when ``offline`` (no key, no network, no cost)."""
-    client = None if offline else make_client(settings)
+def build_services(
+    settings: Settings, offline: bool = False, product_shots: bool = True
+) -> Services:
+    """Live services, or cache-only ones when ``offline`` (no key, no network, no cost).
+
+    With ``use_spark_open``, item analysis runs on Muse Spark Open at the partner endpoint;
+    segmentation and product shots stay on the Meta Model API.
+    """
     cache = DiskCache(settings.cache_dir)
+    meta = None if offline else make_client(settings)
+    if settings.use_spark_open:
+        spark_client = None if offline else make_open_weights_client(settings)
+        spark_model = settings.spark_open_model
+    else:
+        spark_client, spark_model = meta, settings.spark_model
+    photographer = ProductPhotographer(meta, settings.image_model, cache) if product_shots else None
     return Services(
-        sam=SamSegmenter(client, settings.sam_model, cache),
-        spark=SparkAnalyzer(client, settings.spark_model, cache, settings.max_output_tokens),
+        sam=SamSegmenter(meta, settings.sam_model, cache),
+        spark=SparkAnalyzer(spark_client, spark_model, cache, settings.max_output_tokens),
+        photographer=photographer,
     )
 
 
@@ -169,6 +186,7 @@ class Pipeline:
 
         async with self._limit:
             analysis = await self.services.spark.analyze(item_crop, language)
+        shots, shot_calls = await self._product_shot(item_id, found, box, out_dir)
         return Item(
             item_id=item_id,
             detection=Detection(
@@ -183,8 +201,29 @@ class Pipeline:
                 mask_path=mask_path,
             ),
             analysis=analysis.value,
-            calls=[*found.calls, analysis.call],
+            product_shots=shots,
+            calls=[*found.calls, analysis.call, *shot_calls],
         )
+
+    async def _product_shot(
+        self, item_id: str, found: _Found, box: PixelBox, out_dir: Path
+    ) -> tuple[list[str], list[ModelCall]]:
+        """A clean product shot, or none if the image model fails: a listing still works."""
+        photographer = self.services.photographer
+        if photographer is None:
+            return [], []
+        try:
+            async with self._limit:
+                shot, call = await photographer.shoot(
+                    cutout(found.still.image, found.segment.mask, box)
+                )
+        except (OpenAIError, EmptyImageResponseError, OfflineCacheMissError) as error:
+            self.progress(f"{item_id}: no product shot ({type(error).__name__})")
+            return [], []
+        rel = f"shots/{item_id}.webp"
+        (out_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+        (out_dir / rel).write_bytes(shot)
+        return [rel], [call]
 
 
 def _drop_video_repeats(items: list[Item]) -> list[Item]:

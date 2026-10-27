@@ -1,8 +1,12 @@
 """Fake Meta API client for offline tests: answers by endpoint and requested schema."""
 
+import base64
+import io
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from typing import Any
+
+from PIL import Image
 
 from off_my_shelf.mocks import load_mock_pack
 from off_my_shelf.spark import SceneInventory
@@ -18,6 +22,12 @@ SAM_SIZE = (320, 334)
 ANALYSIS_JSON = load_mock_pack().items[0].analysis.model_dump_json()
 
 
+def webp_bytes(size: tuple[int, int] = (32, 32)) -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", size, "lightgray").save(buffer, "WEBP")
+    return buffer.getvalue()
+
+
 class FakeMetaClient:
     """Stands in for ``AsyncOpenAI``: SAM streams, Spark structured replies."""
 
@@ -29,8 +39,21 @@ class FakeMetaClient:
         self.sam_text = sam_text
         self.chat_calls: list[dict[str, Any]] = []
         self.sam_calls: list[dict[str, Any]] = []
+        self.image_calls: list[dict[str, Any]] = []
+        self.post_calls: list[tuple[str, dict[str, Any]]] = []
+        self.transcript = "It works but the cable is a bit worn."
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._chat))
         self.responses = SimpleNamespace(create=self._responses)
+        self.images = SimpleNamespace(edit=self._image_edit)
+
+    async def _image_edit(self, **kwargs: Any) -> SimpleNamespace:  # noqa: ANN401
+        self.image_calls.append(kwargs)
+        data = base64.b64encode(webp_bytes()).decode("ascii")
+        return SimpleNamespace(data=[SimpleNamespace(b64_json=data)])
+
+    async def post(self, path: str, **kwargs: Any) -> dict[str, Any]:  # noqa: ANN401
+        self.post_calls.append((path, kwargs))
+        return {"sessionId": "s1", "transcript": self.transcript, "audioDurationMs": 1500}
 
     async def _chat(self, **kwargs: Any) -> SimpleNamespace:  # noqa: ANN401
         self.chat_calls.append(kwargs)

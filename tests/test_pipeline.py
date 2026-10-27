@@ -3,8 +3,10 @@
 from pathlib import Path
 
 import cv2
+import httpx2
 import numpy as np
 import pytest
+from openai import APIConnectionError
 from PIL import Image
 
 from fakes import SAM_SIZE, FakeMetaClient
@@ -14,6 +16,7 @@ from off_my_shelf.config import Settings
 from off_my_shelf.media import UnsupportedMediaError, collect_inputs, stills
 from off_my_shelf.mocks import load_pack
 from off_my_shelf.pipeline import Pipeline, Services, build_services
+from off_my_shelf.product_shots import ProductPhotographer
 from off_my_shelf.sam import SamSegmenter
 from off_my_shelf.schema import Language
 from off_my_shelf.spark import SparkAnalyzer
@@ -28,6 +31,7 @@ def _services(client: FakeMetaClient, settings: Settings) -> Services:
     return Services(
         sam=SamSegmenter(client, settings.sam_model, cache),  # type: ignore[arg-type]
         spark=SparkAnalyzer(client, settings.spark_model, cache, 4000),  # type: ignore[arg-type]
+        photographer=ProductPhotographer(client, settings.image_model, cache),  # type: ignore[arg-type]
     )
 
 
@@ -57,9 +61,13 @@ async def test_pipeline_writes_a_valid_pack(tmp_path: Path) -> None:
     item = pack.items[0]
     assert item.analysis.listing.language is Language.TR
     assert pack.media == ["media/shelf.jpg"]
-    for rel in (item.detection.crop_path, item.detection.mask_path, *pack.media):
+    assert item.product_shots == ["shots/item-001.webp"]
+    for rel in (item.detection.crop_path, item.detection.mask_path, *item.product_shots):
         assert rel is not None and (out / rel).is_file()
-    assert [c.step.value for c in item.calls] == ["analyze", "segment", "analyze"]
+    assert (out / pack.media[0]).is_file()
+    steps = [c.step.value for c in item.calls]
+    assert steps == ["analyze", "segment", "analyze", "product_shot"]
+    assert client.image_calls[0]["image"][2] == "image/png"
     assert load_pack(out) == pack
     assert messages[-1] == "done: 1 items"
 
@@ -111,6 +119,38 @@ def test_collect_and_reject_media(tmp_path: Path) -> None:
     assert collect_inputs([tmp_path]) == [photo]
     with pytest.raises(UnsupportedMediaError):
         stills(tmp_path / "doc.pdf", max_side=512)
+
+
+async def test_failed_product_shot_keeps_the_listing(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    photos = tmp_path / "photos"
+    _photo(photos)
+    client = FakeMetaClient(["lamp"])
+
+    async def broken(**_: object) -> object:
+        raise APIConnectionError(request=httpx2.Request("POST", "https://api.meta.ai/v1"))
+
+    client.images.edit = broken
+    messages: list[str] = []
+    pack = await Pipeline(_services(client, settings), settings, messages.append).run(
+        [photos], tmp_path / "out"
+    )
+    assert pack.items[0].product_shots == []
+    assert any("no product shot" in m for m in messages)
+
+
+def test_spark_open_routes_analysis_to_partner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("META_API_KEY", "meta")
+    monkeypatch.setenv("BASETEN_API_KEY", "partner")
+    monkeypatch.setenv("OMS_USE_SPARK_OPEN", "true")
+    services = build_services(_settings(tmp_path))
+    assert services.spark.model == "meta-models/muse-spark-open-1026"
+    assert services.spark.client is not None
+    assert "baseten" in str(services.spark.client.base_url)
+    assert services.sam.client is not None
+    assert "meta.ai" in str(services.sam.client.base_url)
 
 
 def test_cli_offline_reports_cache_miss(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

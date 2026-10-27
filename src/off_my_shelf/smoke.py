@@ -4,6 +4,8 @@ Usage:
     uv run python -m off_my_shelf.smoke spark
     uv run python -m off_my_shelf.smoke sam --image path/to/photo.jpg --phrase mug
     uv run python -m off_my_shelf.smoke vision --image path/to/photo.jpg
+    uv run python -m off_my_shelf.smoke image --image path/to/photo.jpg
+    uv run python -m off_my_shelf.smoke transcribe --audio path/to/note.wav
 """
 
 import argparse
@@ -19,8 +21,10 @@ from off_my_shelf.costs import token_cost
 from off_my_shelf.imaging import load_image
 from off_my_shelf.meta_client import make_client
 from off_my_shelf.mocks import MOCK_PACK_DIR
+from off_my_shelf.product_shots import ProductPhotographer
 from off_my_shelf.sam import SamSegmenter
 from off_my_shelf.spark import SparkAnalyzer
+from off_my_shelf.voice import Transcriber
 
 DEFAULT_IMAGE = MOCK_PACK_DIR / "media" / "shelf_01.png"
 
@@ -82,8 +86,39 @@ async def smoke_vision(settings: Settings, args: argparse.Namespace) -> None:
     )
 
 
+async def smoke_image(settings: Settings, args: argparse.Namespace) -> None:
+    """A product shot of the whole photo, saved next to the cache for a look."""
+    image = load_image(args.image, settings.max_image_side_px)
+    cache = DiskCache(settings.cache_dir)
+    photographer = ProductPhotographer(make_client(settings), settings.image_model, cache)
+    shot, call = await photographer.shoot(image)
+    out = settings.cache_dir / "smoke_product_shot.webp"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(shot)
+    print(
+        f"model={settings.image_model} bytes={len(shot)} cached={call.cached} "
+        f"latency_ms={call.latency_ms} -> {out}"
+    )
+
+
+async def smoke_transcribe(settings: Settings, args: argparse.Namespace) -> None:
+    if args.audio is None:
+        raise SystemExit("--audio path/to/note.wav is required")
+    cache = DiskCache(settings.cache_dir)
+    transcriber = Transcriber(make_client(settings), settings.transcribe_model, cache)
+    text, call = await transcriber.transcribe(args.audio.read_bytes())
+    print(f"model={settings.transcribe_model} cached={call.cached} latency_ms={call.latency_ms}")
+    print(f"transcript: {text!r}")
+
+
 Check = Callable[[Settings, argparse.Namespace], Coroutine[Any, Any, None]]
-CHECKS: dict[str, Check] = {"spark": smoke_spark, "sam": smoke_sam, "vision": smoke_vision}
+CHECKS: dict[str, Check] = {
+    "spark": smoke_spark,
+    "sam": smoke_sam,
+    "vision": smoke_vision,
+    "image": smoke_image,
+    "transcribe": smoke_transcribe,
+}
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -93,6 +128,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("check", choices=sorted(CHECKS))
     parser.add_argument("--image", type=Path, default=DEFAULT_IMAGE, help="photo for vision checks")
     parser.add_argument("--phrase", default="box", help="noun phrase for the sam check")
+    parser.add_argument("--audio", type=Path, help="WAV file for the transcribe check")
     args = parser.parse_args(argv)
     asyncio.run(CHECKS[args.check](get_settings(), args))
 
