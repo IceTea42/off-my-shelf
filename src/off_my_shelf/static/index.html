@@ -24,10 +24,13 @@
   button { border:0; font-weight:600; cursor:pointer; background:var(--ink); color:#fff; }
   button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); }
   button:disabled { opacity:.5; cursor:default; }
-  #status { margin:16px 0; color:var(--muted); min-height:1.5em; }
-  #status.error { color:#a12; }
-  #warnings { margin:8px 0; padding:10px 14px; border-radius:10px; background:#f9eeda; color:#6b4a00; }
-  #warnings ul { margin:4px 0 0; padding-left:18px; }
+  #log { margin:16px 0; height:9.5em; overflow-y:auto; padding:8px 12px; border:1px solid var(--line);
+         border-radius:10px; background:var(--card); font-size:14px; line-height:1.45; }
+  #log .muted { color:var(--muted); }
+  #log .warn { color:#8a5a00; }
+  #log .error { color:#a12; }
+  #log .agent { font-weight:600; }
+  #log time { color:var(--muted); font-size:12px; margin-right:8px; font-variant-numeric:tabular-nums; }
   .bar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:8px 0; }
   #grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fill, minmax(300px, 1fr)); }
   .card { background:var(--card); border:1px solid var(--line); border-radius:14px; overflow:hidden;
@@ -77,8 +80,7 @@
     <button id="demo" class="ghost" type="button">Try the demo</button>
   </form>
 
-  <div id="status"></div>
-  <div id="warnings" role="status" hidden></div>
+  <div id="log" role="log" aria-live="polite" hidden></div>
   <div class="bar" id="bar" hidden>
     <strong id="summary"></strong>
     <a id="zip"><button type="button">Download listing pack</button></a>
@@ -90,7 +92,6 @@
       <button id="run-agent" type="button">Run agent</button>
       <button id="mic" class="ghost" type="button">Speak instead</button>
     </div>
-    <div id="agent-out" class="muted"></div>
   </section>
   <div id="grid"></div>
 </div>
@@ -107,15 +108,18 @@ function el(tag, props = {}, children = []) {
   return node;
 }
 
-function setWarnings(warnings = []) {
-  $("warnings").hidden = warnings.length === 0;
-  $("warnings").replaceChildren(el("strong", { textContent: "Skipped" }),
-    el("ul", {}, warnings.map((w) => el("li", { textContent: w }))));
-}
-
-function setStatus(text, isError = false) {
-  $("status").textContent = text;
-  $("status").className = isError ? "error" : "";
+// One scrollable activity log: run progress, warnings, voice and agent replies all stay readable.
+const MAX_LOG_LINES = 500;
+function log(text, kind = "") {
+  const box = $("log");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+  const stamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const line = el("div", { className: kind }, [el("time", { textContent: stamp }), el("span", { textContent: text })]);
+  box.append(line);
+  while (box.childElementCount > MAX_LOG_LINES) box.firstElementChild.remove();
+  box.hidden = false;
+  if (atBottom) box.scrollTop = box.scrollHeight; // keep following unless the reader scrolled up
+  return line.lastElementChild; // a live line (e.g. a recording timer) can update its text
 }
 
 function choose(files) {
@@ -198,20 +202,19 @@ function render(pack, base) {
   $("zip").href = `/api/runs/${current}/zip`;
   $("bar").hidden = false;
   $("grid").replaceChildren(...items.map((item) => card(item, base)));
-  setWarnings(pack.warnings);
-  setStatus(items.length ? "" : "No items found: try a closer photo.");
+  if (!items.length) log("No items found: try a closer photo.", "warn");
 }
 
 async function follow(runId) {
-  for (;;) {
-    const response = await fetch(`/api/runs/${runId}`);
+  for (let seen = 0; ;) {
+    const response = await fetch(`/api/runs/${runId}?since=${seen}`);
     const run = await response.json();
+    run.messages.forEach((m) => log(m, m.startsWith("warning:") ? "warn" : "muted"));
+    seen = run.message_count;
     if (run.status === "done") { document.title = "✓ Off My Shelf"; return show(run); }
-    setWarnings(run.warnings);
-    if (run.status === "error") { document.title = "⚠ Off My Shelf"; return setStatus(run.error, true); }
+    if (run.status === "error") { document.title = "⚠ Off My Shelf"; return log(run.error, "error"); }
     document.title = run.items_total
       ? `(${run.items_done}/${run.items_total}) Off My Shelf` : "… Off My Shelf";
-    setStatus(run.messages.at(-1) || "Starting…");
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
 }
@@ -225,14 +228,14 @@ async function start(event) {
   $("start").disabled = true;
   $("bar").hidden = true;
   $("grid").replaceChildren();
-  setStatus("Uploading…");
+  log(`Uploading ${chosen.length} file(s)…`, "muted");
   try {
     const response = await fetch("/api/runs", { method: "POST", body });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || response.statusText);
     await follow(data.run_id);
   } catch (error) {
-    setStatus(String(error.message || error), true);
+    log(String(error.message || error), "error");
   } finally {
     $("start").disabled = chosen.length === 0;
   }
@@ -253,14 +256,14 @@ async function postForm(url, body) {
 async function callAgent(fields) {
   const body = new FormData();
   Object.entries(fields).forEach(([key, value]) => body.append(key, value));
-  $("agent-out").textContent = "The agent is working…";
+  log("The agent is working…", "muted");
   try {
     const data = await postForm(`/api/runs/${current}/agent`, body);
-    const list = el("ul", {}, data.actions.map((action) => el("li", { textContent: action })));
-    $("agent-out").replaceChildren(el("div", { textContent: data.summary }), list);
+    data.actions.forEach((action) => log(`• ${action}`, action.includes("blocked by check") ? "warn" : ""));
+    log(data.summary, "agent");
     render(data.pack, `/runs/${current}/pack/`);
   } catch (error) {
-    $("agent-out").textContent = `Agent failed: ${error.message}`;
+    log(`Agent failed: ${error.message}`, "error");
   }
 }
 
@@ -279,14 +282,14 @@ async function startMic() {
   media.ondataavailable = (e) => e.data.size && chunks.push(e.data);
   const stopped = new Promise((resolve) => (media.onstop = resolve));
   media.start(250);
+  const live = log("Listening… say your goal, then press Stop", "muted");
   const tick = setInterval(() => {
     const seconds = Math.round((Date.now() - started) / 1000);
-    $("agent-out").textContent = `Listening… ${seconds} s (say your goal, then press Stop)`;
+    live.textContent = `Listening… ${seconds} s (say your goal, then press Stop)`;
     if (seconds >= MAX_RECORD_S) stopMic().catch(showMicError);
   }, 500);
   recorder = { stream, media, chunks, stopped, tick };
   $("mic").textContent = "Stop and send"; $("mic").className = "rec";
-  $("agent-out").textContent = "Listening…";
 }
 
 async function stopMic() {
@@ -302,11 +305,12 @@ async function stopMic() {
   const blob = new Blob(chunks, { type });
   if (!blob.size) throw new Error("the microphone sent no audio: check the input device");
   const ext = AUDIO_EXT[type.split("/")[1]?.split(";")[0]] || "webm";
-  $("agent-out").textContent = "Transcribing…";
+  log("Transcribing…", "muted");
   const body = new FormData();
   body.append("voice", blob, `goal.${ext}`);
   const { transcript } = await postForm("/api/transcribe", body);
   $("goal").value = transcript;
+  log(`Heard: “${transcript}”`);
   return callAgent({ goal: transcript });
 }
 
@@ -314,7 +318,7 @@ function showMicError(error) {
   if (recorder) { clearInterval(recorder.tick); recorder.stream.getTracks().forEach((t) => t.stop()); }
   recorder = null;
   $("mic").textContent = "Speak instead"; $("mic").className = "ghost";
-  $("agent-out").textContent = `Voice failed: ${error.message}`;
+  log(`Voice failed: ${error.message}`, "error");
 }
 
 async function init() {
@@ -322,7 +326,7 @@ async function init() {
   $("language").replaceChildren(...config.languages.map((code) =>
     el("option", { value: code, textContent: LANG_NAMES[code] || code,
       selected: code === config.default_language })));
-  if (config.offline) setStatus("Offline mode: no API key set. The demo and cached runs still work.");
+  if (config.offline) log("Offline mode: no API key set. The demo and cached runs still work.", "warn");
   $("files").addEventListener("change", (e) => choose(e.target.files));
   const drop = $("drop");
   drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });

@@ -94,6 +94,10 @@ def test_upload_runs_the_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
         run = _wait(client, response.json()["run_id"])
         assert run["status"] == "done", run["error"]
         assert run["items_done"] == run["items_total"] == 1
+        count = run["message_count"]
+        assert isinstance(count, int) and count > 1
+        tail = client.get(f"/api/runs/{response.json()['run_id']}?since={count - 1}").json()
+        assert tail["messages"] == ["done: 1 items"]
         pack = run["pack"]
         assert isinstance(pack, dict)
         assert pack["items"][0]["analysis"]["listing"]["language"] == "fr"

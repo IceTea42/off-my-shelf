@@ -104,6 +104,7 @@ async def test_agent_applies_verified_actions(tmp_path: Path) -> None:
     second = next(i for i in result.pack.items if i.item_id == "item-002")
     assert second.analysis.triage.decision is TriageDecision.DONATE
     assert result.summary.startswith("Priced the lamp")
+    assert any("reply blocked by check (5 is below" in action for action in result.actions)
     assert len(result.calls) == 4 and result.calls[0].cost_usd is not None
 
     # The model saw the rejected reply and the unknown item, so it could correct itself.

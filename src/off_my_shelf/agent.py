@@ -237,6 +237,7 @@ class _Session:
         item = self._item(item_id)
         problem = check_buyer_reply(item, reply)
         if problem:
+            self.actions.append(f"{item_id}: reply blocked by check ({problem}), rewriting")
             return f"rejected: {problem}. Write a new reply."
         draft = BuyerReply(buyer_message=buyer_message[:1000], draft_reply=reply[:1000])
         item.buyer_replies = [*item.buyer_replies, draft]

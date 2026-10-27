@@ -284,3 +284,26 @@ async def test_all_photos_too_small_is_an_error(tmp_path: Path) -> None:
         await Pipeline(_services(FakeMetaClient(["mug"]), settings), settings).run(
             [tmp_path / "tiny.png"], tmp_path / "out"
         )
+
+
+async def test_video_item_is_listed_once_from_its_best_frame(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    path = tmp_path / "shelf.mp4"
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter.fourcc(*"mp4v"), 10.0, SAM_SIZE)
+    rng = np.random.default_rng(1)
+    for _ in range(40):  # 4 s of noise: several sharp, well-spaced keyframes
+        writer.write(rng.integers(0, 255, (SAM_SIZE[1], SAM_SIZE[0], 3), dtype=np.uint8))
+    writer.release()
+    client = FakeMetaClient(phrases=["lamp"])
+
+    pack = await Pipeline(_services(client, settings), settings).run([path], tmp_path / "out")
+
+    names = [c["response_format"]["json_schema"]["name"] for c in client.chat_calls]
+    assert names.count("SceneInventory") == len(pack.media) > 1
+    assert names.count("ItemAnalysis") == len(pack.items) == 1
+    later_frame = next(
+        c
+        for c in client.chat_calls[1:]
+        if c["response_format"]["json_schema"]["name"] == "SceneInventory"
+    )
+    assert "Items listed from earlier frames: lamp." in str(later_frame["messages"])

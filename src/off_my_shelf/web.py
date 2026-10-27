@@ -195,7 +195,8 @@ def _run_routes(app: FastAPI, state: _State) -> None:
         return {"run_id": DEMO_RUN_ID}
 
     @app.get("/api/runs/{run_id}")
-    async def run_status(run_id: str) -> dict[str, Any]:
+    async def run_status(run_id: str, since: int = 0) -> dict[str, Any]:
+        """Run state; ``messages`` holds only those after the first ``since``."""
         run = state.runs.get(run_id)
         if run is None:
             raise HTTPException(404, "unknown run")
@@ -205,11 +206,11 @@ def _run_routes(app: FastAPI, state: _State) -> None:
         return {
             "run_id": run_id,
             "status": run.status.value,
-            "messages": run.messages[-20:],
+            "messages": run.messages[max(since, 0) :],
+            "message_count": len(run.messages),
             "error": run.error,
             "items_done": run.pipeline.items_done if run.pipeline else 0,
             "items_total": run.pipeline.items_total if run.pipeline else 0,
-            "warnings": run.pipeline.warnings if run.pipeline else [],
             "pack": pack,
             "base_url": f"/runs/{run_id}/pack/",
         }

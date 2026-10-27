@@ -78,6 +78,7 @@ class _Found:
     media_path: str
     segment: Segment
     calls: tuple[ModelCall, ...]
+    phrase: str
     slug: str
 
 
@@ -86,6 +87,21 @@ def _best(segments: Sequence[Segment]) -> Segment | None:
     if not segments:
         return None
     return max(segments, key=lambda s: (s.confidence or 0.0, s.box.area))
+
+
+def _best_sightings(found: list[_Found]) -> list[_Found]:
+    """A video shows an item in several frames: keep its best view (largest mask) before any
+    per-item call, so each item is listed and photographed once."""
+    best: dict[tuple[str, str], _Found] = {}
+    for sighting in found:
+        if sighting.still.frame_index is None:
+            continue
+        key = (str(sighting.still.source), sighting.phrase.casefold())
+        kept = best.get(key)
+        if kept is None or sighting.segment.mask.sum() > kept.segment.mask.sum():
+            best[key] = sighting
+    keep = {id(s) for s in best.values()}
+    return [f for f in found if f.still.frame_index is None or id(f) in keep]
 
 
 def _merge_duplicates(found: list[_Found]) -> list[_Found]:
@@ -162,6 +178,7 @@ class Pipeline:
         found: list[_Found] = []
         for file in files:
             self.progress(f"reading {file.name}")
+            seen: list[str] = []  # phrases from earlier frames of this video
             for still in stills(file, self.settings.max_image_side_px):
                 min_side = self.settings.min_still_side_px
                 if min(still.image.size) < min_side:
@@ -174,11 +191,13 @@ class Pipeline:
                 media_path = f"media/{still.stem}.jpg"
                 (out_dir / media_path).write_bytes(encode(still.image, "JPEG"))
                 media_paths.append(media_path)
-                found.extend(await self._detect(still, media_path))
+                hits = await self._detect(still, media_path, seen)
+                found.extend(hits)
+                seen.extend(h.phrase for h in hits if h.phrase not in seen)
 
         if not media_paths:
             raise ValueError("every photo or frame was too small: " + "; ".join(self.warnings))
-        detections = _merge_duplicates(found)
+        detections = _merge_duplicates(_best_sightings(found))
         self.items_total = len(detections)
         self.progress(f"writing listings for {len(detections)} items")
         items = await asyncio.gather(
@@ -198,8 +217,8 @@ class Pipeline:
         self.progress(f"done: {len(pack.items)} items")
         return pack
 
-    async def _detect(self, still: Still, media_path: str) -> list[_Found]:
-        inventory = await self.services.spark.inventory(still.image)
+    async def _detect(self, still: Still, media_path: str, seen: Sequence[str]) -> list[_Found]:
+        inventory = await self.services.spark.inventory(still.image, seen)
         unique = {item.phrase: item for item in inventory.value.items}
         self.progress(f"{media_path}: looking for {', '.join(unique) or 'nothing'}")
 
@@ -221,9 +240,12 @@ class Pipeline:
                     "too few pixels to judge it; take a closer photo"
                 )
                 continue
-            hits.append((seg, call, slugify(item.short_name or item.phrase)))
+            hits.append((seg, call, item.phrase, slugify(item.short_name or item.phrase)))
         share = _split_cost(inventory.call, len(hits))
-        return [_Found(still, media_path, seg, (share, call), slug) for seg, call, slug in hits]
+        return [
+            _Found(still, media_path, seg, (share, call), phrase, slug)
+            for seg, call, phrase, slug in hits
+        ]
 
     async def _item(self, item_id: str, found: _Found, out_dir: Path, language: Language) -> Item:
         image = found.still.image

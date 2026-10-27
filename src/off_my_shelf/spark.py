@@ -13,6 +13,7 @@ goes through four defences before it is accepted:
 import json
 import re
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -240,9 +241,20 @@ class SparkAnalyzer:
         self.max_tokens = max_tokens
         self.reasoning_effort = reasoning_effort
 
-    async def inventory(self, image: Image.Image) -> SparkResult[SceneInventory]:
+    async def inventory(
+        self, image: Image.Image, seen: Sequence[str] = ()
+    ) -> SparkResult[SceneInventory]:
+        """Items in one photo; ``seen`` are phrases from earlier frames of the same video, so
+        the same item keeps the same phrase and its sightings can be merged."""
+        text = "List the items in this photo."
+        if seen:
+            text += (
+                " It is a later frame of a video. Items listed from earlier frames: "
+                + "; ".join(seen)
+                + ". When you see one of them again, reuse its exact phrase."
+            )
         content = [
-            {"type": "text", "text": "List the items in this photo."},
+            {"type": "text", "text": text},
             _image_part(image),
         ]
         system = INVENTORY_SYSTEM.format(limit=MAX_SCENE_ITEMS, skeleton=_skeleton(SceneInventory))
