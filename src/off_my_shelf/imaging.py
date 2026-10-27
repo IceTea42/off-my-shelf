@@ -8,10 +8,14 @@ from typing import Literal
 
 import cv2
 import numpy as np
+import pillow_jxl  # noqa: F401 - registers the JPEG XL codec with Pillow on import
 from numpy.typing import NDArray
 from PIL import Image, ImageOps
+from pillow_heif import register_heif_opener
 
 from off_my_shelf.schema import BoundingBox
+
+register_heif_opener()  # HEIC/HEIF; AVIF is built into Pillow
 
 ImageFormat = Literal["JPEG", "PNG", "WEBP"]
 MIME: dict[ImageFormat, str] = {"JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp"}

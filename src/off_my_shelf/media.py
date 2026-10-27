@@ -1,6 +1,7 @@
 """Input media: collect photos and videos, and turn each into normalised still images.
 
-Photos (JPEG, PNG, WebP, HEIC) are loaded upright and downscaled. Videos are sampled about
+Photos (JPEG, PNG, WebP, HEIC/HEIF, AVIF, JPEG XL, TIFF, BMP, GIF) are loaded upright and
+downscaled; animated formats use their first frame. Videos are sampled about
 once per second and the sharpest, well-spaced frames are kept, so a slow pan over a shelf
 becomes a few clear stills.
 """
@@ -12,14 +13,18 @@ from pathlib import Path
 import cv2
 import numpy as np
 from PIL import Image
-from pillow_heif import register_heif_opener
 
 from off_my_shelf.imaging import load_image
 
-register_heif_opener()
-
-IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"})
-VIDEO_SUFFIXES = frozenset({".mp4", ".mov", ".m4v", ".webm", ".avi"})
+IMAGE_SUFFIXES = frozenset(
+    {".jpg", ".jpeg", ".jfif", ".png", ".webp", ".heic", ".heif", ".avif", ".jxl"}
+    | {".tif", ".tiff", ".bmp", ".gif"}
+)
+# Decoded by the FFmpeg build bundled in OpenCV's wheels (Windows and Linux alike).
+VIDEO_SUFFIXES = frozenset(
+    {".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi", ".3gp", ".mts", ".m2ts", ".wmv", ".mpg"}
+    | {".mpeg", ".flv", ".ogv"}
+)
 
 
 class UnsupportedMediaError(ValueError):

@@ -20,6 +20,7 @@ dependencies = [
     "opencv-python-headless>=5.0.0.93",
     "pillow>=13.0.0",
     "pillow-heif>=1.8.1",
+    "pillow-jxl-plugin>=1.3.8",
     "pydantic>=2.9",
     "pydantic-settings>=2.16.1",
     "python-multipart>=0.0.32",

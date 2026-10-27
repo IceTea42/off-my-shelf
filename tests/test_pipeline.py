@@ -121,6 +121,28 @@ def test_video_keyframes(tmp_path: Path) -> None:
     assert frames[0].stem.startswith("pan-f")
 
 
+@pytest.mark.parametrize("fmt", ["AVIF", "JXL", "HEIF", "WEBP", "TIFF", "BMP", "GIF", "PNG"])
+def test_image_formats_load(tmp_path: Path, fmt: str) -> None:
+    suffix = {"JXL": ".jxl", "HEIF": ".heic", "TIFF": ".tif"}.get(fmt, f".{fmt.lower()}")
+    path = tmp_path / f"photo{suffix}"
+    Image.new("RGB", (64, 48), (180, 40, 40)).save(path, fmt)
+    assert collect_inputs([tmp_path]) == [path]
+    (still,) = stills(path, max_side=1280)
+    assert still.image.size == (64, 48) and still.image.mode == "RGB"
+
+
+@pytest.mark.parametrize(("suffix", "codec"), [(".mkv", "mp4v"), (".avi", "MJPG")])
+def test_video_containers_load(tmp_path: Path, suffix: str, codec: str) -> None:
+    path = tmp_path / f"clip{suffix}"
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter.fourcc(*codec), 10.0, (64, 48))
+    rng = np.random.default_rng(1)
+    for _ in range(20):
+        writer.write(rng.integers(0, 255, (48, 64, 3), dtype=np.uint8))
+    writer.release()
+    frames = stills(path, max_side=1280, max_frames=2)
+    assert frames and frames[0].image.size == (64, 48)
+
+
 def test_collect_and_reject_media(tmp_path: Path) -> None:
     photo = _photo(tmp_path)
     assert collect_inputs([tmp_path]) == [photo]
