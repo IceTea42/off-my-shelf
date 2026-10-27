@@ -30,7 +30,13 @@ def _services(client: FakeMetaClient, settings: Settings) -> Services:
     cache = DiskCache(settings.cache_dir)
     return Services(
         sam=SamSegmenter(client, settings.sam_model, cache),  # type: ignore[arg-type]
-        spark=SparkAnalyzer(client, settings.spark_model, cache, 4000),  # type: ignore[arg-type]
+        spark=SparkAnalyzer(
+            client,  # type: ignore[arg-type]
+            settings.spark_model,
+            cache,
+            4000,
+            settings.reasoning_effort,
+        ),
         photographer=ProductPhotographer(client, settings.image_model, cache),  # type: ignore[arg-type]
     )
 

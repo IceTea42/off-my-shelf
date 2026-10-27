@@ -17,7 +17,7 @@ from off_my_shelf.config import Settings
 from off_my_shelf.imaging import PixelBox, crop, cutout, encode, mask_image
 from off_my_shelf.media import Still, collect_inputs, stills
 from off_my_shelf.meta_client import make_client, make_open_weights_client
-from off_my_shelf.mocks import PACK_FILENAME
+from off_my_shelf.mocks import save_pack
 from off_my_shelf.product_shots import EmptyImageResponseError, ProductPhotographer
 from off_my_shelf.sam import SamSegmenter, Segment
 from off_my_shelf.schema import (
@@ -55,13 +55,14 @@ def build_services(
     meta = None if offline else make_client(settings)
     if settings.use_spark_open:
         spark_client = None if offline else make_open_weights_client(settings)
-        spark_model = settings.spark_open_model
+        spark_model, effort = settings.spark_open_model, None
     else:
         spark_client, spark_model = meta, settings.spark_model
+        effort = settings.reasoning_effort
     photographer = ProductPhotographer(meta, settings.image_model, cache) if product_shots else None
     return Services(
         sam=SamSegmenter(meta, settings.sam_model, cache),
-        spark=SparkAnalyzer(spark_client, spark_model, cache, settings.max_output_tokens),
+        spark=SparkAnalyzer(spark_client, spark_model, cache, settings.max_output_tokens, effort),
         photographer=photographer,
     )
 
@@ -151,9 +152,7 @@ class Pipeline:
             media=media_paths,
             items=_drop_video_repeats(list(items)),
         )
-        (out_dir / PACK_FILENAME).write_text(
-            pack.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="\n"
-        )
+        save_pack(out_dir, pack)
         self.progress(f"done: {len(pack.items)} items")
         return pack
 

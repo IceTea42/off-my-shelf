@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     max_image_side_px: int = Field(default=1280, ge=256)
     # Reasoning tokens count toward the output budget, so this leaves room for thinking.
     max_output_tokens: int = Field(default=8000, ge=256)
+    # Muse Spark reasoning depth: minimal | low | medium | high | xhigh ("none" is rejected)
+    reasoning_effort: str | None = "low"
     request_timeout_s: float = Field(default=120.0, gt=0)
     max_concurrency: int = Field(default=4, ge=1)
 

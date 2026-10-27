@@ -194,12 +194,18 @@ class SparkAnalyzer:
     """Muse Spark calls; ``client=None`` means cache-only (offline)."""
 
     def __init__(
-        self, client: AsyncOpenAI | None, model: str, cache: DiskCache, max_tokens: int
+        self,
+        client: AsyncOpenAI | None,
+        model: str,
+        cache: DiskCache,
+        max_tokens: int,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.client = client
         self.model = model
         self.cache = cache
         self.max_tokens = max_tokens
+        self.reasoning_effort = reasoning_effort
 
     async def inventory(self, image: Image.Image) -> SparkResult[SceneInventory]:
         content = [
@@ -239,7 +245,9 @@ class SparkAnalyzer:
         ]
         strict = strict_json_schema(schema_model)
         wire = wire_schema(strict)
-        key = cache_key("spark", self.model, schema_model.__name__, wire, messages)
+        key = cache_key(
+            "spark", self.model, self.reasoning_effort, schema_model.__name__, wire, messages
+        )
         cached = self.cache.get_json(key)
         if isinstance(cached, dict):
             value = parse_reply(str(cached["content"]), schema_model, strict)
@@ -283,11 +291,15 @@ class SparkAnalyzer:
             "type": "json_schema",
             "json_schema": {"name": name, "schema": schema, "strict": True},
         }
+        extra: dict[str, Any] = {}
+        if self.reasoning_effort:
+            extra["reasoning_effort"] = self.reasoning_effort
         response = await client.chat.completions.create(
             model=self.model,
             messages=wire_messages,
             response_format=response_format,
             max_tokens=self.max_tokens,
+            **extra,
         )
         usage = response.usage
         choice = response.choices[0]

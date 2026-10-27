@@ -74,6 +74,7 @@ async def smoke_vision(settings: Settings, args: argparse.Namespace) -> None:
         settings.spark_model,
         DiskCache(settings.cache_dir),
         settings.max_output_tokens,
+        settings.reasoning_effort,
     )
     inventory = await analyzer.inventory(image)
     print(f"inventory: {[item.phrase for item in inventory.value.items]}")

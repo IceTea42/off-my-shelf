@@ -44,6 +44,16 @@
   .recycle { background:var(--recycle); }
   .desc { white-space:pre-line; font-size:14px; }
   .card button { margin-top:auto; }
+  .agent { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px;
+           margin:12px 0 16px; display:grid; gap:10px; }
+  .agent textarea, .buyer textarea { width:100%; font:inherit; padding:10px; border-radius:10px;
+           border:1px solid var(--line); resize:vertical; }
+  .agent .actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .agent ul { margin:0; padding-left:20px; }
+  button.rec { background:#a12; }
+  .reply { border-left:3px solid var(--line); padding:4px 10px; font-size:14px; }
+  .reply.ok { border-color:var(--sell); }
+  .buyer { display:grid; gap:6px; }
 </style>
 </head>
 <body>
@@ -68,6 +78,15 @@
     <strong id="summary"></strong>
     <a id="zip"><button type="button">Download listing pack</button></a>
   </div>
+  <section class="agent" id="agent" hidden>
+    <strong>Tell the agent what you need</strong>
+    <textarea id="goal" rows="2" placeholder="e.g. I'm moving on Friday: sell the electronics fast and donate the books"></textarea>
+    <div class="actions">
+      <button id="run-agent" type="button">Run agent</button>
+      <button id="mic" class="ghost" type="button">Speak instead</button>
+    </div>
+    <div id="agent-out" class="muted"></div>
+  </section>
   <div id="grid"></div>
 </div>
 
@@ -75,6 +94,7 @@
 const $ = (id) => document.getElementById(id);
 const LANG_NAMES = { en: "English", fr: "Français", tr: "Türkçe" };
 let chosen = [];
+let current = null;
 
 function el(tag, props = {}, children = []) {
   const node = Object.assign(document.createElement(tag), props);
@@ -113,6 +133,24 @@ function card(item, base) {
     setTimeout(() => (copy.textContent = "Copy listing"), 1500);
   });
   const defects = a.condition.defects.length ? ` · ${a.condition.defects.join(", ")}` : "";
+  const mode = item.pricing_mode ? ` · ${item.pricing_mode.replace("_", " ")}` : "";
+  const replies = item.buyer_replies.map((reply, index) => {
+    const approve = el("button", { type: "button", className: "ghost",
+      textContent: reply.approved ? "Approved: copy" : "Approve and copy" });
+    approve.addEventListener("click", async () => {
+      await fetch(`/api/runs/${current}/items/${item.item_id}/replies/${index}/approve`,
+        { method: "POST" });
+      try { await navigator.clipboard.writeText(reply.draft_reply); } catch {}
+      approve.textContent = "Approved: copied";
+    });
+    return el("div", { className: "reply" + (reply.approved ? " ok" : "") }, [
+      el("div", { className: "muted", textContent: `Buyer: ${reply.buyer_message}` }),
+      el("div", { textContent: reply.draft_reply }), approve]);
+  });
+  const ask = el("textarea", { rows: 1, placeholder: "Paste a buyer's message…" });
+  const draft = el("button", { type: "button", className: "ghost", textContent: "Draft a reply" });
+  draft.addEventListener("click", () => ask.value.trim() &&
+    callAgent({ buyer_item_id: item.item_id, buyer_message: ask.value.trim() }));
   return el("article", { className: "card" }, [
     el("div", { className: "photos" + (photos.length === 1 ? " single" : "") }, photos),
     el("div", { className: "body" }, [
@@ -127,20 +165,27 @@ function card(item, base) {
       el("div", { className: "muted",
         textContent: `Condition: ${a.condition.grade.replace("_", " ")}${defects}` }),
       el("div", { className: "desc", textContent: a.listing.description }),
-      el("div", { className: "muted", textContent: a.triage.reason }),
+      el("div", { className: "muted", textContent: a.triage.reason + mode }),
       copy,
+      el("div", { className: "buyer" }, [...replies, ask, draft]),
     ]),
   ]);
 }
 
 function show(run) {
-  const items = run.pack.items;
+  current = run.run_id;
+  $("agent").hidden = false;
+  render(run.pack, run.base_url);
+}
+
+function render(pack, base) {
+  const items = pack.items;
   const selling = items.filter((i) => i.analysis.triage.decision === "sell");
   const value = selling.reduce((sum, i) => sum + i.analysis.price.suggested, 0);
   $("summary").textContent = `${items.length} items · ${selling.length} to sell, about ${Math.round(value)} €`;
-  $("zip").href = `/api/runs/${run.run_id}/zip`;
+  $("zip").href = `/api/runs/${current}/zip`;
   $("bar").hidden = false;
-  $("grid").replaceChildren(...items.map((item) => card(item, run.base_url)));
+  $("grid").replaceChildren(...items.map((item) => card(item, base)));
   setStatus(items.length ? "" : "No items found: try a closer photo.");
 }
 
@@ -177,6 +222,58 @@ async function start(event) {
   }
 }
 
+async function callAgent(fields, voice = null) {
+  const body = new FormData();
+  Object.entries(fields).forEach(([key, value]) => body.append(key, value));
+  if (voice) body.append("voice", voice, "goal.wav");
+  $("agent-out").textContent = "The agent is working…";
+  const response = await fetch(`/api/runs/${current}/agent`, { method: "POST", body });
+  const data = await response.json();
+  if (!response.ok) { $("agent-out").textContent = data.detail || "Agent failed"; return; }
+  const list = el("ul", {}, data.actions.map((action) => el("li", { textContent: action })));
+  $("agent-out").replaceChildren(el("div", { textContent: data.summary }), list);
+  render(data.pack, `/runs/${current}/pack/`);
+}
+
+// Microphone -> 16-bit PCM WAV in the browser (the server resamples to what the API needs).
+let recorder = null;
+async function toggleMic() {
+  if (recorder) {
+    const { stream, context, node, chunks } = recorder;
+    recorder = null;
+    node.disconnect(); stream.getTracks().forEach((t) => t.stop());
+    $("mic").textContent = "Speak instead"; $("mic").className = "ghost";
+    const wav = encodeWav(chunks, context.sampleRate);
+    await context.close();
+    return callAgent({ goal: $("goal").value }, wav);
+  }
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const context = new AudioContext();
+  const source = context.createMediaStreamSource(stream);
+  const node = context.createScriptProcessor(4096, 1, 1);
+  const chunks = [];
+  node.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  source.connect(node); node.connect(context.destination);
+  recorder = { stream, context, node, chunks };
+  $("mic").textContent = "Stop and send"; $("mic").className = "rec";
+}
+
+function encodeWav(chunks, rate) {
+  const length = chunks.reduce((n, c) => n + c.length, 0);
+  const view = new DataView(new ArrayBuffer(44 + length * 2));
+  const text = (offset, s) => [...s].forEach((ch, i) => view.setUint8(offset + i, ch.charCodeAt(0)));
+  text(0, "RIFF"); view.setUint32(4, 36 + length * 2, true); text(8, "WAVE"); text(12, "fmt ");
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true); text(36, "data");
+  view.setUint32(40, length * 2, true);
+  let offset = 44;
+  for (const chunk of chunks) for (const sample of chunk) {
+    view.setInt16(offset, Math.max(-1, Math.min(1, sample)) * 0x7fff, true); offset += 2;
+  }
+  return new Blob([view], { type: "audio/wav" });
+}
+
 async function init() {
   const config = await (await fetch("/api/config")).json();
   $("language").replaceChildren(...config.languages.map((code) =>
@@ -191,6 +288,10 @@ async function init() {
     e.preventDefault(); drop.classList.remove("over"); choose(e.dataTransfer.files);
   });
   $("form").addEventListener("submit", start);
+  $("run-agent").addEventListener("click", () => $("goal").value.trim() &&
+    callAgent({ goal: $("goal").value.trim() }));
+  $("mic").addEventListener("click", () => toggleMic().catch((e) =>
+    ($("agent-out").textContent = `Microphone unavailable: ${e.message}`)));
   $("demo").addEventListener("click", async () => {
     const response = await fetch("/api/demo", { method: "POST" });
     await follow((await response.json()).run_id);

@@ -4,6 +4,7 @@ import argparse
 import asyncio
 from pathlib import Path
 
+from off_my_shelf.agent import AgentRequest, run_agent
 from off_my_shelf.config import get_settings
 from off_my_shelf.export import export_pack
 from off_my_shelf.pipeline import Pipeline, build_services
@@ -22,6 +23,19 @@ def _run(args: argparse.Namespace) -> None:
 
 def _export(args: argparse.Namespace) -> None:
     print(f"listing pack: {export_pack(args.pack)}")
+
+
+def _agent(args: argparse.Namespace) -> None:
+    request = AgentRequest(
+        goal=args.goal or "",
+        voice=args.voice.read_bytes() if args.voice else None,
+        buyer_messages=dict(args.buyer or []),
+    )
+    outcome = asyncio.run(run_agent(get_settings(), args.pack, request, offline=args.offline))
+    print(f"goal: {outcome.goal}")
+    for action in outcome.actions:
+        print(f"  - {action}")
+    print(outcome.summary)
 
 
 def _serve(args: argparse.Namespace) -> None:
@@ -50,6 +64,20 @@ def main(argv: list[str] | None = None) -> None:
     export = commands.add_parser("export", help="rebuild index.html, listings and zip of a pack")
     export.add_argument("pack", type=Path, help="pack folder containing listing_pack.json")
     export.set_defaults(handler=_export)
+
+    agent = commands.add_parser("agent", help="let the agent act on a pack from a goal")
+    agent.add_argument("pack", type=Path, help="pack folder containing listing_pack.json")
+    agent.add_argument("goal", nargs="?", help='e.g. "moving Friday: sell fast, donate books"')
+    agent.add_argument("--voice", type=Path, help="WAV voice note with the goal")
+    agent.add_argument(
+        "--buyer",
+        nargs=2,
+        action="append",
+        metavar=("ITEM_ID", "MESSAGE"),
+        help="a buyer's message to answer (repeatable)",
+    )
+    agent.add_argument("--offline", action="store_true", help="replay cached steps only")
+    agent.set_defaults(handler=_agent)
 
     serve = commands.add_parser("serve", help="start the web app")
     serve.add_argument("--host", help="interface, e.g. 0.0.0.0 to share on your network")

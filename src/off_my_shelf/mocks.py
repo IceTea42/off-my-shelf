@@ -17,6 +17,14 @@ def load_pack(pack_dir: Path) -> ListingPack:
     return ListingPack.model_validate_json(raw)
 
 
+def save_pack(pack_dir: Path, pack: ListingPack) -> None:
+    """Write ``listing_pack.json`` (LF endings, UTF-8) into a pack directory."""
+    pack_dir.mkdir(parents=True, exist_ok=True)
+    (pack_dir / PACK_FILENAME).write_text(
+        pack.model_dump_json(indent=2) + "\n", encoding="utf-8", newline="\n"
+    )
+
+
 def load_mock_pack() -> ListingPack:
     """The 5-item mock pack: all triage decisions, both pricing modes, FR/EN/TR listings."""
     return load_pack(MOCK_PACK_DIR)
