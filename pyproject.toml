@@ -15,10 +15,15 @@ dependencies = [
     "meta-sam-parser>=0.1.0",
     "numpy>=2.5.4",
     "openai>=3.39.0",
+    "opencv-python-headless>=5.0.0.93",
     "pillow>=13.0.0",
+    "pillow-heif>=1.8.1",
     "pydantic>=2.9",
     "pydantic-settings>=2.16.1",
 ]
+
+[project.scripts]
+off-my-shelf = "off_my_shelf.cli:main"
 
 [dependency-groups]
 dev = [
@@ -68,11 +73,13 @@ line-ending = "lf"
 python_version = "3.12"
 strict = true
 files = ["src", "tests"]
+mypy_path = "tests"
 
 # --- Tests -------------------------------------------------------------------
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+pythonpath = ["tests"]
 asyncio_default_fixture_loop_scope = "function"
 addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
 

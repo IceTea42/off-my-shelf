@@ -8,18 +8,13 @@ from typing import Any
 import pytest
 from PIL import Image
 
+from fakes import SAM_SAMPLE, SAM_SIZE
 from off_my_shelf.cache import DiskCache, OfflineCacheMissError
 from off_my_shelf.imaging import PixelBox
 from off_my_shelf.sam import SamSegmenter, SamStreamError, parse_segments
 
-# Two objects in a 320x334 image, in the API's token format (from meta-sam-parser's docs).
-SAMPLE = (
-    "<0f>0<|box;x1=211;y1=228;x2=270;y2=254;w=320;h=334|>"
-    "<|mask;x=0;y=0;data=27,60,~!!!!M!0c[0o91w?q1!pIH4pPRVp2B3'7`e.ioeAf6-k/#Xd8%dX9x(|>"
-    ",1<|box;x1=155;y1=228;x2=202;y2=254;w=320;h=334|>"
-    "<|mask;x=0;y=0;data=27,48,~!!!!J!0c[q=Pj_zs=*4C4(/./x#:/`S_GnD`=o3?X{emCgO$y@|>\n"
-)
-WIDTH, HEIGHT = 320, 334
+SAMPLE = SAM_SAMPLE
+WIDTH, HEIGHT = SAM_SIZE
 
 
 def test_parse_segments_pairs_boxes_and_masks() -> None:
