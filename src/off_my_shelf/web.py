@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAIError
 
@@ -108,6 +108,34 @@ class _State:
     def pack_dir(self, run_id: str) -> Path:
         return self.settings.runs_dir / run_id / "pack"
 
+    def start_run(self, files: list[UploadFile], language: Language, product_shots: bool) -> str:
+        """Save the uploads and run the pipeline in the background; returns the run id."""
+        if not files or len(files) > MAX_UPLOAD_FILES:
+            raise HTTPException(400, f"send 1 to {MAX_UPLOAD_FILES} photos or videos")
+        if not self.offline:  # offline runs replay the cache for free
+            self.require_live()
+        run_id = uuid.uuid4().hex[:12]
+        upload_dir = self.settings.runs_dir / run_id / "uploads"
+        _save_uploads(files, upload_dir)
+        run = self.runs[run_id] = Run(run_id)
+        services = build_services(self.settings, offline=self.offline, product_shots=product_shots)
+        pipeline = Pipeline(services, self.settings, progress=run.messages.append)
+        run.pipeline = pipeline
+
+        async def work() -> None:
+            try:
+                pack = await pipeline.run([upload_dir], self.pack_dir(run_id), language)
+                self.spent_usd += live_cost(pack)
+                await asyncio.to_thread(export_pack, self.pack_dir(run_id))
+                run.status = RunStatus.DONE
+            except Exception as error:
+                run.status, run.error = RunStatus.ERROR, f"{type(error).__name__}: {error}"
+
+        task = asyncio.create_task(work())
+        self.tasks.add(task)
+        task.add_done_callback(self.tasks.discard)
+        return run_id
+
     def finished(self, run_id: str) -> Path:
         run = self.runs.get(run_id)
         if run is None or run.status is not RunStatus.DONE:
@@ -120,6 +148,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     state.settings.runs_dir.mkdir(parents=True, exist_ok=True)
     app = FastAPI(title="Off My Shelf")
     app.mount("/runs", StaticFiles(directory=state.settings.runs_dir), name="runs")
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     _page_routes(app, state)
     _run_routes(app, state)
     _voice_routes(app, state)
@@ -135,6 +164,21 @@ def _page_routes(app: FastAPI, state: _State) -> None:
     @app.get("/favicon.ico")
     async def favicon_ico() -> FileResponse:
         return FileResponse(STATIC_DIR / "favicon.png", media_type="image/png")
+
+    @app.get("/manifest.webmanifest")
+    async def manifest() -> FileResponse:
+        return FileResponse(
+            STATIC_DIR / "manifest.webmanifest", media_type="application/manifest+json"
+        )
+
+    @app.get("/sw.js")
+    async def service_worker() -> FileResponse:
+        """Served from the root so the installed app's scope is the whole site."""
+        return FileResponse(
+            STATIC_DIR / "sw.js",
+            media_type="text/javascript",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> str:
@@ -156,33 +200,13 @@ def _run_routes(app: FastAPI, state: _State) -> None:
         language: Annotated[Language, Form()] = Language.EN,
         product_shots: Annotated[bool, Form()] = True,
     ) -> dict[str, str]:
-        if not files or len(files) > MAX_UPLOAD_FILES:
-            raise HTTPException(400, f"send 1 to {MAX_UPLOAD_FILES} photos or videos")
-        if not state.offline:  # offline runs replay the cache for free
-            state.require_live()
-        run_id = uuid.uuid4().hex[:12]
-        upload_dir = state.settings.runs_dir / run_id / "uploads"
-        _save_uploads(files, upload_dir)
-        run = state.runs[run_id] = Run(run_id)
-        services = build_services(
-            state.settings, offline=state.offline, product_shots=product_shots
-        )
-        pipeline = Pipeline(services, state.settings, progress=run.messages.append)
-        run.pipeline = pipeline
+        return {"run_id": state.start_run(files, language, product_shots)}
 
-        async def work() -> None:
-            try:
-                pack = await pipeline.run([upload_dir], state.pack_dir(run_id), language)
-                state.spent_usd += live_cost(pack)
-                await asyncio.to_thread(export_pack, state.pack_dir(run_id))
-                run.status = RunStatus.DONE
-            except Exception as error:
-                run.status, run.error = RunStatus.ERROR, f"{type(error).__name__}: {error}"
-
-        task = asyncio.create_task(work())
-        state.tasks.add(task)
-        task.add_done_callback(state.tasks.discard)
-        return {"run_id": run_id}
+    @app.post("/share")
+    async def share_target(files: Annotated[list[UploadFile], File()]) -> RedirectResponse:
+        """Android share sheet ("Share" photos to the installed app): start a run, show it."""
+        run_id = state.start_run(files, state.settings.default_language, product_shots=True)
+        return RedirectResponse(f"/?run={run_id}", status_code=303)
 
     @app.post("/api/demo")
     async def demo() -> dict[str, str]:

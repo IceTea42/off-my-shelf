@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f7a4d">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
 <title>Off My Shelf</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="alternate icon" href="/favicon.ico" type="image/png">
@@ -10,6 +13,7 @@
   :root { --bg:#f6f4ef; --card:#fff; --ink:#1d1c1a; --muted:#6b675f; --line:#e4e0d6;
           --sell:#1f7a4d; --donate:#2f5fa7; --recycle:#8a5a12; }
   * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
   body { margin:0; background:var(--bg); color:var(--ink);
          font:15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   .wrap { max-width:1100px; margin:auto; padding:24px 16px; }
@@ -50,7 +54,6 @@
   .sell { background:var(--sell); } .donate { background:var(--donate); }
   .recycle { background:var(--recycle); }
   .desc { white-space:pre-line; font-size:14px; }
-  .card button { margin-top:auto; }
   .agent { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px;
            margin:12px 0 16px; display:grid; gap:10px; }
   .agent textarea, .buyer textarea { width:100%; font:inherit; padding:10px; border-radius:10px;
@@ -61,6 +64,21 @@
   .reply { border-left:3px solid var(--line); padding:4px 10px; font-size:14px; }
   .reply.ok { border-color:var(--sell); }
   .buyer { display:grid; gap:6px; }
+  .capture { display:none; gap:8px; flex:1 1 100%; }
+  .pick { flex:1; display:flex; align-items:center; justify-content:center; font-weight:600;
+          border-radius:10px; background:var(--sell); color:#fff; cursor:pointer; }
+  .card .actions { display:flex; gap:8px; margin-top:auto; }
+  .card .actions button { flex:1; }
+  button, select, .pick { min-height:44px; }
+  @media (pointer: coarse) { .capture { display:flex; } }
+  @media (max-width: 600px) {
+    .wrap { padding:16px 12px calc(16px + env(safe-area-inset-bottom)); }
+    h1 { font-size:24px; }
+    form > * { flex:1 1 100%; }
+    #grid { grid-template-columns:1fr; }
+    .bar { flex-wrap:wrap; }
+    .bar a, .bar button { width:100%; }
+  }
 </style>
 </head>
 <body>
@@ -70,6 +88,10 @@
     sorted into sell, donate and recycle.</p>
 
   <form id="form">
+    <div class="capture">
+      <label class="pick"><input id="snap" type="file" accept="image/*" capture="environment" hidden>Take a photo</label>
+      <label class="pick"><input id="film" type="file" accept="video/*" capture="environment" hidden>Film the shelf</label>
+    </div>
     <label class="drop" id="drop">
       <input id="files" type="file" multiple accept="image/*,video/*,.heic,.heif,.avif,.jxl,.mkv,.mts,.m2ts" hidden>
       <span id="drop-text">Drop photos or videos here, or click to choose</span>
@@ -122,8 +144,15 @@ function log(text, kind = "") {
   return line.lastElementChild; // a live line (e.g. a recording timer) can update its text
 }
 
-function choose(files) {
-  chosen = [...files];
+async function shareListing(title, text, imageUrl) {
+  const blob = await (await fetch(imageUrl)).blob();
+  const file = new File([blob], "item.jpg", { type: blob.type || "image/jpeg" });
+  const data = navigator.canShare?.({ files: [file] }) ? { title, text, files: [file] } : { title, text };
+  await navigator.share(data);
+}
+
+function choose(files, add = false) {
+  chosen = add ? [...chosen, ...files] : [...files];
   $("drop-text").textContent = chosen.length
     ? `${chosen.length} file(s): ${chosen.map((f) => f.name).join(", ")}`
     : "Drop photos or videos here, or click to choose";
@@ -148,6 +177,13 @@ function card(item, base) {
     catch { copy.textContent = "Copy failed"; }
     setTimeout(() => (copy.textContent = "Copy listing"), 1500);
   });
+  const actions = [copy];
+  if (navigator.share) { // phones: hand the listing and its photo to a marketplace or chat app
+    const share = el("button", { type: "button", className: "ghost", textContent: "Share" });
+    share.addEventListener("click", () => shareListing(a.listing.title, text,
+      base + (item.product_shots[0] || item.detection.crop_path)).catch(() => {}));
+    actions.push(share);
+  }
   const defects = a.condition.defects.length ? ` · ${a.condition.defects.join(", ")}` : "";
   const mode = item.pricing_mode ? ` · ${item.pricing_mode.replace("_", " ")}` : "";
   const replies = item.buyer_replies.map((reply, index) => {
@@ -182,7 +218,7 @@ function card(item, base) {
         textContent: `Condition: ${a.condition.grade.replace("_", " ")}${defects}` }),
       el("div", { className: "desc", textContent: a.listing.description }),
       el("div", { className: "muted", textContent: a.triage.reason + mode }),
-      copy,
+      el("div", { className: "actions" }, actions),
       el("div", { className: "buyer" }, [...replies, ask, draft]),
     ]),
   ]);
@@ -229,6 +265,7 @@ async function start(event) {
   $("bar").hidden = true;
   $("grid").replaceChildren();
   log(`Uploading ${chosen.length} file(s)…`, "muted");
+  $("log").scrollIntoView({ behavior: "smooth", block: "nearest" }); // on phones the form fills the screen
   try {
     const response = await fetch("/api/runs", { method: "POST", body });
     const data = await response.json();
@@ -328,6 +365,13 @@ async function init() {
       selected: code === config.default_language })));
   if (config.offline) log("Offline mode: no API key set. The demo and cached runs still work.", "warn");
   $("files").addEventListener("change", (e) => choose(e.target.files));
+  ["snap", "film"].forEach((id) => $(id).addEventListener("change", (e) => {
+    choose(e.target.files, true); // camera shots add up, one per tap
+    e.target.value = "";
+  }));
+  const shared = new URLSearchParams(location.search).get("run"); // from the Android share sheet
+  if (shared) { history.replaceState(null, "", "/"); follow(shared); }
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
   const drop = $("drop");
   drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
   drop.addEventListener("dragleave", () => drop.classList.remove("over"));

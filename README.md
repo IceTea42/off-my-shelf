@@ -92,7 +92,8 @@ uv run pre-commit run --all-files
 uv run pytest
 ```
 
-Runs on Windows and Linux; CI tests both. See [AGENTS.md](AGENTS.md) for repository
+Runs on Windows and Linux; CI tests both. On Android it installs as an app: see
+[docs/phone.md](docs/phone.md). See [AGENTS.md](AGENTS.md) for repository
 conventions and [NEW_IN_HACKATHON.md](NEW_IN_HACKATHON.md) for what was built during the
 hackathon.
 

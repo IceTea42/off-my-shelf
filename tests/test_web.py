@@ -184,3 +184,39 @@ def test_transcribe_debug_keeps_notes_and_reports_api_errors(
     assert "HTTP 502 from POST /v1/asr/transcribe: {'type': 'upstream'}" in reply.json()["detail"]
     kept = sorted(path.name.split("-", 2)[-1] for path in (settings.cache_dir / "voice").iterdir())
     assert kept == ["api.wav", "result.txt", "upload.wav"]
+
+
+def test_installable_app_files(tmp_path: Path) -> None:
+    with TestClient(web.create_app(_settings(tmp_path))) as client:
+        page = client.get("/").text
+        assert 'rel="manifest"' in page and 'capture="environment"' in page
+        manifest = client.get("/manifest.webmanifest")
+        assert manifest.headers["content-type"].startswith("application/manifest+json")
+        icons = manifest.json()["icons"]
+        for icon in icons:
+            assert client.get(icon["src"]).headers["content-type"] == "image/png"
+        assert {icon["sizes"] for icon in icons} >= {"192x192", "512x512"}
+        worker = client.get("/sw.js")
+        assert worker.headers["content-type"].startswith("text/javascript")
+        assert worker.headers["cache-control"] == "no-cache"
+
+
+def test_share_target_starts_a_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _settings(tmp_path)
+    fake = FakeMetaClient(["lamp"])
+    cache = DiskCache(settings.cache_dir)
+    monkeypatch.setattr(
+        web,
+        "build_services",
+        lambda *_, **__: Services(
+            sam=SamSegmenter(fake, "sam-3.1", cache),  # type: ignore[arg-type]
+            spark=SparkAnalyzer(fake, "muse-spark-1.3", cache, 4000),  # type: ignore[arg-type]
+        ),
+    )
+    with TestClient(web.create_app(settings)) as client:
+        shared = client.post(
+            "/share", files=[("files", ("IMG_1.jpg", _png(), "image/jpeg"))], follow_redirects=False
+        )
+        assert shared.status_code == 303
+        run_id = shared.headers["location"].removeprefix("/?run=")
+        assert _wait(client, run_id)["status"] == "done"
