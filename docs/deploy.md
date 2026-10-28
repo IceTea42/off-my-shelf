@@ -1,41 +1,34 @@
 # Deploying the web app
 
-The Docker image (see `Dockerfile`) serves the app on port 7860. It runs anywhere Docker runs;
-Hugging Face Spaces (Docker SDK) hosts it for free on CPU, which is all the app needs since
-every model runs behind the Meta Model API.
+Every model runs behind the Meta Model API, so the app needs no GPU: a free Hugging Face Space
+(CPU basic) hosts it. The Space uses the Gradio SDK only to run `app.py`, which starts this
+project's own web app; no Gradio interface is involved.
 
 ## Hugging Face Space
 
-1. Create a Space: **New Space → Docker → Blank**, CPU basic, public.
-2. In the Space **Settings → Variables and secrets**:
-   - secret `META_API_KEY` = your key
-   - variable `OMS_BUDGET_USD` = e.g. `5` (live work stops once this much is spent; the demo
-     pack keeps working)
-3. Push this repository to the Space with a Space header on its README:
+The Space `icetea/off-my-shelf` exists (private, CPU basic). Deploy or update it from the repo:
+
+1. Once: create a token with **write** access at <https://huggingface.co/settings/tokens>, then
 
    ```
-   git clone https://huggingface.co/spaces/<user>/off-my-shelf space
-   git archive HEAD | tar -x -C space          # Windows: use Git Bash for this line
-   cd space
+   uv run hf auth login
    ```
 
-   Add at the very top of `space/README.md`:
+2. Each deploy (uploads the files tracked by git; `.env`, caches and packs never leave your
+   machine):
 
    ```
-   ---
-   title: Off My Shelf
-   emoji: 🏷️
-   colorFrom: green
-   colorTo: gray
-   sdk: docker
-   app_port: 7860
-   license: agpl-3.0
-   ---
+   uv run python scripts/deploy_space.py icetea/off-my-shelf --set-secrets --budget 10
    ```
 
-   Then `git add -A`, commit and `git push`. The Space builds the image and starts the app.
+   `--set-secrets` copies `META_API_KEY` from your `.env` into the Space's secrets;
+   `--budget 10` stops live work once $10 (list price) is spent, while the demo pack keeps working.
 
-4. Check `https://<user>-off-my-shelf.hf.space/api/config` returns `"offline": false`.
+3. The Space builds in a few minutes. Open it, then check `/api/config` shows `"offline": false`.
+
+4. To make it public later: Space **Settings → Space Access control → Public**.
+
+A private Space only opens for you while signed in to Hugging Face, also on the phone.
 
 ## Locally with Docker
 

@@ -34,6 +34,7 @@ off-my-shelf = "off_my_shelf.cli:main"
 [dependency-groups]
 dev = [
   "httpx>=0.28.1",
+  "huggingface-hub>=2.3.0",
   "mypy>=1.13",
   "pre-commit>=4.7.0",
   "pytest>=8.3",
@@ -50,7 +51,7 @@ build-backend = "uv_build"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests"]
+src = ["src", "tests", "scripts"]
 
 [tool.ruff.lint]
 select = [
@@ -79,7 +80,7 @@ line-ending = "lf"
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "scripts"]
 mypy_path = "tests"
 
 # --- Tests -------------------------------------------------------------------
