@@ -5,7 +5,7 @@
 **Film the things you no longer use. Get ready-to-post listings, sorted into sell, donate and
 recycle.**
 
-Live demo: _URL coming in S3 (see [docs/deploy.md](docs/deploy.md))_ · Demo video: _coming in S5_
+Live app: [icetea-off-my-shelf.hf.space](https://icetea-off-my-shelf.hf.space) (installs on Android) · Demo video: _coming in S5_
 
 Off My Shelf turns a photo or a short video of a shelf into one listing per item: what it is,
 its condition, a fair second-hand price, a title and description in English, French or Turkish,
