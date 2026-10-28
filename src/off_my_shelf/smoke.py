@@ -5,6 +5,7 @@ Usage:
     uv run python -m off_my_shelf.smoke sam --image path/to/photo.jpg --phrase mug
     uv run python -m off_my_shelf.smoke vision --image path/to/photo.jpg
     uv run python -m off_my_shelf.smoke image --image path/to/photo.jpg --phrase teapot
+    uv run python -m off_my_shelf.smoke open --image path/to/photo.jpg   # Muse Spark Open
     uv run python -m off_my_shelf.smoke transcribe [--audio note.wav]  # default: last kept web note
 """
 
@@ -21,7 +22,7 @@ from off_my_shelf.cache import DiskCache
 from off_my_shelf.config import Settings, get_settings
 from off_my_shelf.costs import token_cost
 from off_my_shelf.imaging import PixelBox, encode, load_image, pixel_lock, studio_canvas
-from off_my_shelf.meta_client import make_client
+from off_my_shelf.meta_client import make_client, make_open_weights_client
 from off_my_shelf.mocks import MOCK_PACK_DIR
 from off_my_shelf.product_shots import ProductPhotographer
 from off_my_shelf.sam import SamSegmenter
@@ -89,6 +90,24 @@ async def smoke_vision(settings: Settings, args: argparse.Namespace) -> None:
     )
 
 
+async def smoke_open(settings: Settings, args: argparse.Namespace) -> None:
+    """One listing from Muse Spark Open at the partner endpoint (open-weight bonus check)."""
+    analyzer = SparkAnalyzer(
+        make_open_weights_client(settings),
+        settings.spark_open_model,
+        DiskCache(settings.cache_dir),
+        settings.max_output_tokens,
+    )
+    image = load_image(args.image, settings.max_image_side_px)
+    listing = await analyzer.analyze(image, settings.default_language)
+    print(f"model={settings.spark_open_model} at {settings.spark_open_base_url}")
+    print(f"title: {listing.value.listing.title!r} price: {listing.value.price.suggested}")
+    print(
+        f"tokens in={listing.call.input_tokens} out={listing.call.output_tokens} "
+        f"latency_ms={listing.call.latency_ms}"
+    )
+
+
 async def smoke_image(settings: Settings, args: argparse.Namespace) -> None:
     """Hide the centre of the photo, let Muse Image fill it, pixel-lock, save for a look."""
     image = load_image(args.image, settings.max_image_side_px)
@@ -128,6 +147,7 @@ CHECKS: dict[str, Check] = {
     "sam": smoke_sam,
     "vision": smoke_vision,
     "image": smoke_image,
+    "open": smoke_open,
     "transcribe": smoke_transcribe,
 }
 
