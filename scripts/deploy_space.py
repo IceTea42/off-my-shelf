@@ -2,9 +2,9 @@
 
 A Gradio Space only runs ``app.py``; ours starts this project's own FastAPI app on the Space's
 port, so no Gradio UI is involved. Only files tracked by git are uploaded (never ``.env``,
-caches or packs), plus three generated files: the Space README header, ``app.py`` and
-``requirements.txt`` (the locked runtime dependencies). Packs and raw footage are never
-uploaded, even if tracked.
+caches), plus three generated files: the Space README header, ``app.py`` and
+``requirements.txt`` (dependency ranges from ``pyproject.toml``). Packs and raw footage are
+never uploaded, even if tracked.
 
 Once:   uv run hf auth login                  (a token with "write" access)
 Deploy: uv run python scripts/deploy_space.py <user>/off-my-shelf --set-secrets --budget 10
@@ -12,6 +12,7 @@ Deploy: uv run python scripts/deploy_space.py <user>/off-my-shelf --set-secrets 
 
 import argparse
 import subprocess
+import tomllib
 from pathlib import Path
 
 from huggingface_hub import CommitOperationAdd, CommitOperationDelete, HfApi
@@ -65,15 +66,11 @@ def _git(*args: str) -> str:
 
 
 def requirements() -> str:
-    """The locked runtime dependencies, as pip pins."""
-    return subprocess.run(
-        ["uv", "export", "--frozen", "--no-dev", "--no-hashes", "--no-emit-project"],  # noqa: S607
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    ).stdout
+    """The project's dependency ranges (not the lock): the Space installs them next to its
+    pinned Gradio, so pip must be free to pick versions both accept."""
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        dependencies: list[str] = tomllib.load(handle)["project"]["dependencies"]
+    return "\n".join(dependencies) + "\n"
 
 
 def space_operations() -> list[CommitOperationAdd]:

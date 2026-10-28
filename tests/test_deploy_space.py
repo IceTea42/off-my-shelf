@@ -20,7 +20,8 @@ def test_space_files_are_tracked_files_plus_space_entry_points() -> None:
     assert isinstance(readme, bytes) and readme.startswith(b"---\ntitle: Off My Shelf")
     assert b"app_file: app.py" in readme
     requirements = files["requirements.txt"]
-    assert isinstance(requirements, bytes) and b"fastapi==" in requirements
+    assert isinstance(requirements, bytes) and b"fastapi>=" in requirements
+    assert b"==" not in requirements  # ranges, so pip can satisfy the Space's own Gradio pins
     assert not any(line.startswith(b".") for line in requirements.splitlines())
     assert not any(name.startswith(deploy.PRIVATE_DIRS) for name in files)
     assert b'main(["serve"])' in files["app.py"]
