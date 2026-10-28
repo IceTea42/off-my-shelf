@@ -202,7 +202,22 @@ class Item(_Model):
     product_shots: list[RelPath] = []
     voice_note: Annotated[str, Field(max_length=2000)] | None = None
     buyer_replies: list[BuyerReply] = []
+    ad_video: RelPath | None = Field(default=None, description="10 s vertical MP4 ad")
+    translations: list[ListingText] = Field(
+        default=[], description="The listing in other languages, one per language"
+    )
     calls: list[ModelCall] = []
+
+
+class Bundle(_Model):
+    """Several low-value items sold together as one lot, at one price."""
+
+    bundle_id: Annotated[str, Field(pattern=r"^lot-[0-9]{3}$")]
+    item_ids: Annotated[list[str], Field(min_length=2)]
+    title: Annotated[str, Field(min_length=3, max_length=80)]
+    description: Annotated[str, Field(min_length=1, max_length=2000)]
+    price: Annotated[float, Field(ge=0.0)]
+    currency: Annotated[str, Field(pattern=r"^[A-Z]{3}$")] = "EUR"
 
 
 class ListingPack(_Model):
@@ -214,6 +229,7 @@ class ListingPack(_Model):
     warnings: list[str] = Field(
         default_factory=list, description="Inputs or items skipped, and why, for the person"
     )
+    bundles: list[Bundle] = []
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
@@ -223,12 +239,16 @@ class ListingPack(_Model):
         unknown = {item.detection.source.media for item in self.items} - set(self.media)
         if unknown:
             raise ValueError(f"items reference media not listed in 'media': {sorted(unknown)}")
+        bundled = [item_id for bundle in self.bundles for item_id in bundle.item_ids]
+        if set(bundled) - set(ids) or len(bundled) != len(set(bundled)):
+            raise ValueError("each bundled item must exist and be in one bundle only")
         return self
 
 
 __all__ = [
     "SCHEMA_VERSION",
     "BoundingBox",
+    "Bundle",
     "BuyerReply",
     "Category",
     "Condition",

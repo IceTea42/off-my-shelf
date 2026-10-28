@@ -14,8 +14,15 @@ from PIL import Image
 from fakes import FakeMetaClient
 from off_my_shelf.cache import DiskCache, OfflineCacheMissError
 from off_my_shelf.cli import main
+from off_my_shelf.demo import (
+    DEMO_MAX_SIDE,
+    DEMO_PACK_DIR,
+    demo_pack_dir,
+    make_demo,
+    referenced_files,
+)
 from off_my_shelf.export import export_pack, listing_text, render_html
-from off_my_shelf.mocks import MOCK_PACK_DIR, load_mock_pack
+from off_my_shelf.mocks import MOCK_PACK_DIR, load_mock_pack, load_pack
 from off_my_shelf.product_shots import ProductPhotographer
 from off_my_shelf.report import step_costs
 from off_my_shelf.voice import AudioFormatError, Transcriber, to_api_wav, wav_seconds
@@ -167,3 +174,18 @@ def test_to_api_wav_decodes_browser_recordings(container: str, codec: str, rate:
             out.mux(packet)
     wav = to_api_wav(buffer.getvalue())
     assert wav_seconds(wav) == pytest.approx(1.0, abs=0.1)
+
+
+def test_make_demo_copies_a_compact_pack(tmp_path: Path) -> None:
+    out = tmp_path / "demo"
+    files = make_demo(MOCK_PACK_DIR, out)
+    pack = load_pack(out)
+    assert pack == load_mock_pack()
+    assert {f.relative_to(out).as_posix() for f in files} == {
+        "listing_pack.json",
+        *referenced_files(pack),
+    }
+    assert all(f.stat().st_size < 1_000_000 for f in files)
+    with Image.open(out / pack.items[0].detection.crop_path) as crop:
+        assert max(crop.size) <= DEMO_MAX_SIDE
+    assert demo_pack_dir() in {DEMO_PACK_DIR, MOCK_PACK_DIR}

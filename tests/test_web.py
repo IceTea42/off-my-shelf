@@ -215,8 +215,37 @@ def test_share_target_starts_a_run(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     )
     with TestClient(web.create_app(settings)) as client:
         shared = client.post(
-            "/share", files=[("files", ("IMG_1.jpg", _png(), "image/jpeg"))], follow_redirects=False
+            "/share", files=[("files", ("IMG_0042", _png(), "image/png"))], follow_redirects=False
         )
         assert shared.status_code == 303
         run_id = shared.headers["location"].removeprefix("/?run=")
         assert _wait(client, run_id)["status"] == "done"
+
+
+def test_translate_once_then_from_the_pack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeMetaClient([])
+    monkeypatch.setattr(
+        web,
+        "build_services",
+        lambda *_, **__: Services(
+            sam=SamSegmenter(fake, "sam-3.1", DiskCache(tmp_path)),  # type: ignore[arg-type]
+            spark=SparkAnalyzer(fake, "muse-spark-1.3", DiskCache(tmp_path), 4000),  # type: ignore[arg-type]
+        ),
+    )
+    settings = _settings(tmp_path).model_copy(update={"meta_api_key": SecretStr("test-key")})
+    with TestClient(web.create_app(settings)) as client:
+        run_id = client.post("/api/demo").json()["run_id"]
+        url = f"/api/runs/{run_id}/items/item-001/translate"
+        english = client.post(url, data={"language": "en"}).json()
+        assert english["language"] == "en" and english["title"].startswith("Black articulated")
+        assert client.post(url, data={"language": "en"}).json() == english
+        assert client.post(url, data={"language": "fr"}).json()["title"].startswith("Lampe")
+        assert len(fake.chat_calls) == 1
+        item = client.get(f"/api/runs/{run_id}").json()["pack"]["items"][0]
+        assert [t["language"] for t in item["translations"]] == ["en"]
+        assert (
+            client.post(
+                f"/api/runs/{run_id}/items/nope/translate", data={"language": "en"}
+            ).status_code
+            == 404
+        )

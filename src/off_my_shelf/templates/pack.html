@@ -55,6 +55,19 @@
   {% endif %}
 </header>
 <main>
+{% for bundle in pack.bundles %}
+  <article class="card" id="{{ bundle.bundle_id }}">
+    <div class="body">
+      <div class="row">
+        <h2>{{ bundle.title }}</h2>
+        <span class="badge sell">lot of {{ bundle.item_ids|length }}</span>
+      </div>
+      <div class="row"><span class="price">{{ "%.0f"|format(bundle.price) }} {{ bundle.currency }}</span>
+        <span class="range">{{ bundle.item_ids|join(", ") }}</span></div>
+      <div class="desc">{{ bundle.description }}</div>
+    </div>
+  </article>
+{% endfor %}
 {% for item in pack.items %}
 {% set a = item.analysis %}
   <article class="card" id="{{ item.item_id }}">
@@ -80,8 +93,14 @@
       <div class="meta">Condition: {{ a.condition.grade.value.replace("_", " ") }}
         {% if a.condition.defects %} · {{ a.condition.defects|join(", ") }}{% endif %}</div>
       <div class="desc">{{ a.listing.description }}</div>
+      {% if item.ad_video %}<video src="{{ item.ad_video }}" controls playsinline preload="metadata"
+        style="width:100%;max-height:420px;background:#000;border-radius:10px"></video>{% endif %}
       <div class="tags">{% for tag in a.listing.tags %}<span>{{ tag }}</span>{% endfor %}</div>
       <div class="meta">{{ a.triage.reason }}</div>
+      {% for t in item.translations %}
+      <details><summary>{{ t.language.value|upper }}: {{ t.title }}</summary>
+        <div class="desc">{{ t.description }}</div></details>
+      {% endfor %}
       <textarea hidden id="text-{{ item.item_id }}">{{ a.listing.title }}
 
 {{ a.listing.description }}

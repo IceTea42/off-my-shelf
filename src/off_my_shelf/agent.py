@@ -25,6 +25,7 @@ from off_my_shelf.export import export_pack
 from off_my_shelf.meta_client import make_client
 from off_my_shelf.mocks import load_pack, save_pack
 from off_my_shelf.schema import (
+    Bundle,
     BuyerReply,
     Item,
     ListingPack,
@@ -37,15 +38,19 @@ from off_my_shelf.schema import (
 from off_my_shelf.voice import Transcriber
 
 MAX_STEPS = 12
+BUNDLE_FLOOR_SHARE = 0.7  # a lot may sell below single-item floors, but not by more than 30 %
 SELL_FAST_AT, MAX_VALUE_AT = 0.2, 0.85  # where the asking price sits in the low..high range
 PRICE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:€|eur|euros?)|(?:€|eur)\s*(\d+(?:[.,]\d+)?)", re.I)
 OFF_PLATFORM = re.compile(
     r"@|https?://|www\.|\+?\d[\d\s.-]{7,}\d|whatsapp|paypal|western union|virement|iban", re.I
 )
 
-AGENT_SYSTEM = """You are the Off My Shelf agent. You help one person clear out their things by \
+AGENT_SYSTEM = f"""You are the Off My Shelf agent. You help one person clear out their things by \
 acting on their listing pack with the tools provided. Follow their goal; when it says nothing \
 about an item, leave that item alone. Keep prices fair for the French second-hand market.
+When the goal is to clear things quickly, group low-value items that belong together (same room \
+or use, each worth under about 10 EUR) into one lot with make_bundle; a lot is priced below the \
+sum of its items' asking prices but never below {BUNDLE_FLOOR_SHARE:.0%} of their floors.
 Rules for buyer replies: polite, short, in the listing's language; never accept or suggest a \
 price below the item's floor; keep the conversation and payment on the marketplace (no phone \
 numbers, emails, links or bank transfers). Tool results tell you whether an action was accepted; \
@@ -111,6 +116,23 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "make_bundle",
+            "description": "Sell several low-value items together as one lot at one price.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "item_ids": {"type": "array", "items": {"type": "string"}, "minItems": 2},
+                    "title": {"type": "string"},
+                    "description": {"type": "string"},
+                    "price": {"type": "number"},
+                },
+                "required": ["item_ids", "title", "description", "price"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "finish",
             "description": "End the session with a short summary for the person.",
             "parameters": {
@@ -158,6 +180,22 @@ def check_buyer_reply(item: Item, reply: str) -> str | None:
     return None
 
 
+def check_bundle(items: list[Item], price: float, already_bundled: set[str]) -> str | None:
+    """Why a lot is unacceptable, or None when it passes."""
+    if len(items) < 2:  # noqa: PLR2004 - a lot is at least two items
+        return "a lot needs at least two different items"
+    if already_bundled:
+        return f"already in a lot: {', '.join(sorted(already_bundled))}"
+    if any(i.analysis.triage.decision is TriageDecision.RECYCLE for i in items):
+        return "items to recycle cannot be sold in a lot"
+    if len({i.analysis.price.currency for i in items}) > 1:
+        return "items are priced in different currencies"
+    floor = BUNDLE_FLOOR_SHARE * sum(floor_price(i) for i in items)
+    if price < floor:
+        return f"{price:g} is below the lot's floor of {floor:.0f}"
+    return None
+
+
 class _Session:
     """Tool implementations over one pack; each returns the text the model sees."""
 
@@ -165,11 +203,13 @@ class _Session:
         self.items = {item.item_id: item.model_copy(deep=True) for item in pack.items}
         self.order = [item.item_id for item in pack.items]
         self.pack = pack
+        self.bundles = [bundle.model_copy(deep=True) for bundle in pack.bundles]
         self.actions: list[str] = []
         self.summary: str | None = None
 
     def result(self) -> ListingPack:
-        return self.pack.model_copy(update={"items": [self.items[i] for i in self.order]})
+        items = [self.items[i] for i in self.order]
+        return self.pack.model_copy(update={"items": items, "bundles": self.bundles})
 
     def dispatch(self, name: str, args: dict[str, Any]) -> str:
         handlers: dict[str, Callable[..., str]] = {
@@ -177,6 +217,7 @@ class _Session:
             "set_pricing_mode": self.set_pricing_mode,
             "set_triage": self.set_triage,
             "draft_buyer_reply": self.draft_buyer_reply,
+            "make_bundle": self.make_bundle,
             "finish": self.finish,
         }
         handler = handlers.get(name)
@@ -210,6 +251,7 @@ class _Session:
                     "currency": a.price.currency,
                     "triage": a.triage.decision.value,
                     "pricing_mode": self.items[item_id].pricing_mode,
+                    "bundle": self._bundle_of(item_id),
                 }
             )
         return json.dumps(rows, ensure_ascii=False)
@@ -243,6 +285,32 @@ class _Session:
         item.buyer_replies = [*item.buyer_replies, draft]
         self.actions.append(f"{item_id}: reply drafted, waiting for approval")
         return "ok: draft saved for human approval"
+
+    def _bundle_of(self, item_id: str) -> str | None:
+        return next((b.bundle_id for b in self.bundles if item_id in b.item_ids), None)
+
+    def make_bundle(self, item_ids: list[str], title: str, description: str, price: float) -> str:
+        items = [self._item(item_id) for item_id in dict.fromkeys(item_ids)]
+        problem = check_bundle(
+            items, price, {i.item_id for i in items if self._bundle_of(i.item_id)}
+        )
+        if problem:
+            self.actions.append(f"lot blocked by check ({problem}), rewriting")
+            return f"rejected: {problem}."
+        bundle = Bundle(
+            bundle_id=f"lot-{len(self.bundles) + 1:03d}",
+            item_ids=[item.item_id for item in items],
+            title=title[:80],
+            description=description[:2000],
+            price=float(round(price)),
+            currency=items[0].analysis.price.currency,
+        )
+        self.bundles.append(bundle)
+        self.actions.append(
+            f"{bundle.bundle_id}: {len(items)} items as '{bundle.title}' "
+            f"at {bundle.price:g} {bundle.currency}"
+        )
+        return f"ok: {bundle.bundle_id} created"
 
     def finish(self, summary: str) -> str:
         self.summary = summary.strip() or "Done."

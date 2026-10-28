@@ -11,7 +11,15 @@ Off My Shelf turns a photo or a short video of a shelf into one listing per item
 its condition, a fair second-hand price, a title and description in English, French or Turkish,
 a clean product shot, and a sell / donate / recycle decision. An agent then acts on the whole
 pack from a typed or spoken goal ("I'm moving on Friday: sell the electronics fast, give the
-books away") and drafts replies to buyers that a person approves before sending.
+books away"): it prices for a quick sale or for the best price, groups cheap items into lots, and
+drafts replies to buyers that a person approves before sending.
+
+- **On the phone:** installs as an Android app (camera, microphone, share sheet). Share photos
+  from the gallery into it, and share each listing or video ad to Leboncoin, Vinted or WhatsApp.
+- **Every language you sell in:** listings in English, French or Turkish, and any listing
+  translated with one tap; speak your goal in any of them.
+- **A video ad per item:** a 10-second vertical clip (Reels, Shorts, TikTok) made from the
+  item's real photo, its price and a hook line.
 
 ## Quickstart
 
@@ -46,7 +54,7 @@ flowchart LR
 
 | Meta model | What it does here |
 | --- | --- |
-| **Muse Spark 1.3** | Lists the items in each photo; writes each listing as schema-checked JSON; rejects completed shots that changed the item; drives the agent's tool calls |
+| **Muse Spark 1.3** | Lists the items in each photo; writes each listing as schema-checked JSON; rejects completed shots that changed the item; translates listings; writes video-ad hooks; drives the agent's tool calls |
 | **SAM 3.1** | Finds and masks each listed item from its noun phrase |
 | **Muse Image 1.0** | Completes only the hidden parts of a partly covered item; every visible pixel stays the photo's own |
 | **Muse Voice Transcribe 1.0** | Turns a spoken goal ("sell fast, donate the books") into text for the agent |
@@ -61,8 +69,10 @@ replays without network.
 uv run off-my-shelf run photos/ --out packs/shelf --lang fr   # photos or videos -> pack
 uv run off-my-shelf agent packs/shelf "moving Friday: sell fast, donate the books"
 uv run off-my-shelf agent packs/shelf --buyer item-001 "Would you take 5 euros?"
+uv run off-my-shelf ads packs/shelf                           # 10 s video ad per item to sell
 uv run off-my-shelf export packs/shelf                        # HTML page + zip
 uv run off-my-shelf costs packs/shelf                         # cost + latency per step
+uv run off-my-shelf make-demo packs/shelf                     # use a real run as the demo pack
 uv run off-my-shelf eval data/eval/items.csv                  # mini eval report
 uv run python -m off_my_shelf.smoke spark                     # one live call per model
 ```
@@ -71,7 +81,8 @@ uv run python -m off_my_shelf.smoke spark                     # one live call pe
 
 - Buyer replies are drafts: the agent cannot send anything, a person approves each one.
 - Every agent action is checked before it applies: a reply is rejected if it goes below the
-  item's floor price or moves contact or payment off the marketplace, and the agent is told why.
+  item's floor price or moves contact or payment off the marketplace, a lot if it goes below 70 %
+  of its items' floors, and the agent is told why and tries again.
 - Product shots are built from the photo's own pixels. When part of an item is hidden, only
   that part is AI-completed, the shot is labelled as such, and it is dropped if the model moved
   the item, added an object or invented (or hid) damage.

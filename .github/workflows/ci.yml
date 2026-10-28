@@ -59,3 +59,21 @@ jobs:
       - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    name: deploy Hugging Face Space
+    needs: [checks, docker, secrets]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}  # optional: without it the job does nothing
+    steps:
+      - uses: actions/checkout@v7
+        if: env.HF_TOKEN != ''
+      - uses: astral-sh/setup-uv@v7
+        if: env.HF_TOKEN != ''
+      - name: Upload to icetea/off-my-shelf
+        if: env.HF_TOKEN != ''
+        run: |
+          uv sync --locked
+          uv run python scripts/deploy_space.py icetea/off-my-shelf

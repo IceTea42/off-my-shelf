@@ -9,8 +9,16 @@ from fakes import SAM_SIZE, FakeMetaClient
 from off_my_shelf.cache import DiskCache
 from off_my_shelf.cli import main
 from off_my_shelf.config import Settings
-from off_my_shelf.evaluate import Truth, load_truth, name_matches, run_eval, score_item, summarise
-from off_my_shelf.mocks import load_mock_pack
+from off_my_shelf.evaluate import (
+    Truth,
+    add_pack_to_eval,
+    load_truth,
+    name_matches,
+    run_eval,
+    score_item,
+    summarise,
+)
+from off_my_shelf.mocks import MOCK_PACK_DIR, load_mock_pack
 from off_my_shelf.pipeline import Services
 from off_my_shelf.sam import SamSegmenter
 from off_my_shelf.spark import SparkAnalyzer
@@ -75,3 +83,16 @@ def test_cli_eval_offline_needs_cache(tmp_path: Path, monkeypatch: pytest.Monkey
     csv_path = _dataset(tmp_path / "data")
     with pytest.raises(LookupError):
         main(["eval", str(csv_path), "--offline"])
+
+
+def test_add_pack_to_eval_then_skip_unfilled_rows(tmp_path: Path) -> None:
+    dataset = tmp_path / "eval" / "items.csv"
+    hints = add_pack_to_eval(MOCK_PACK_DIR, dataset)
+    assert len(hints) == len(load_mock_pack().items)
+    assert load_truth(dataset) == []  # nothing filled in yet
+    rows = dataset.read_text(encoding="utf-8").splitlines()
+    assert rows[0] == "image,name,brand,price_eur"
+    rows[1] = rows[1].replace(",,,", ",desk lamp,,12")
+    dataset.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    [truth] = load_truth(dataset)
+    assert truth.name == "desk lamp" and truth.price_eur == 12 and truth.image.is_file()

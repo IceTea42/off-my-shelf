@@ -6,6 +6,7 @@ runs offline: cached runs and the bundled demo pack still work.
 
 import asyncio
 import logging
+import mimetypes
 import shutil
 import uuid
 from collections.abc import Callable
@@ -23,13 +24,15 @@ from openai import OpenAIError
 from off_my_shelf.agent import AgentRequest, run_agent
 from off_my_shelf.cache import DiskCache
 from off_my_shelf.config import Settings, get_settings
+from off_my_shelf.demo import demo_pack_dir
 from off_my_shelf.export import export_pack
 from off_my_shelf.media import IMAGE_SUFFIXES, VIDEO_SUFFIXES
 from off_my_shelf.meta_client import describe_error, make_client
-from off_my_shelf.mocks import MOCK_PACK_DIR, load_pack, save_pack
+from off_my_shelf.mocks import load_pack, save_pack
 from off_my_shelf.pipeline import Pipeline, build_services
 from off_my_shelf.report import live_cost
-from off_my_shelf.schema import Language
+from off_my_shelf.schema import Item, Language, ListingPack
+from off_my_shelf.video_ad import make_item_ad
 from off_my_shelf.voice import AudioFormatError, Transcriber, to_api_wav, wav_seconds
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -72,9 +75,18 @@ def _voice_keeper(settings: Settings, suffix: str) -> Callable[[str, bytes], Non
     return keep
 
 
+def _suffix(upload: UploadFile) -> str:
+    """The file's extension, or one guessed from its type (phone galleries may share names
+    without one, e.g. ``IMG_0042``)."""
+    suffix = Path(upload.filename or "").suffix.lower()
+    if suffix in MEDIA_SUFFIXES or not upload.content_type:
+        return suffix
+    return (mimetypes.guess_extension(upload.content_type) or suffix).lower()
+
+
 def _save_uploads(files: list[UploadFile], upload_dir: Path) -> None:
     """Store uploads under neutral names; reject the whole batch on any unsupported file."""
-    suffixes = [Path(upload.filename or "").suffix.lower() for upload in files]
+    suffixes = [_suffix(upload) for upload in files]
     bad = [u.filename for u, s in zip(files, suffixes, strict=True) if s not in MEDIA_SUFFIXES]
     if bad:
         raise HTTPException(400, f"unsupported file: {', '.join(map(str, bad))}")
@@ -136,6 +148,15 @@ class _State:
         task.add_done_callback(self.tasks.discard)
         return run_id
 
+    def item(self, run_id: str, item_id: str) -> tuple[Path, ListingPack, Item]:
+        """A finished run's pack folder, its pack and one of its items (404 otherwise)."""
+        target = self.finished(run_id)
+        pack = load_pack(target)
+        found = next((i for i in pack.items if i.item_id == item_id), None)
+        if found is None:
+            raise HTTPException(404, "unknown item")
+        return target, pack, found
+
     def finished(self, run_id: str) -> Path:
         run = self.runs.get(run_id)
         if run is None or run.status is not RunStatus.DONE:
@@ -152,6 +173,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     _page_routes(app, state)
     _run_routes(app, state)
     _voice_routes(app, state)
+    _item_routes(app, state)
     _agent_routes(app, state)
     return app
 
@@ -213,7 +235,7 @@ def _run_routes(app: FastAPI, state: _State) -> None:
         """The bundled mock pack as a finished run, for a demo without any API call."""
         target = state.pack_dir(DEMO_RUN_ID)
         if not target.exists():
-            shutil.copytree(MOCK_PACK_DIR, target)
+            shutil.copytree(demo_pack_dir(), target)
             await asyncio.to_thread(export_pack, target)
         state.runs[DEMO_RUN_ID] = Run(DEMO_RUN_ID, RunStatus.DONE, ["demo pack loaded"])
         return {"run_id": DEMO_RUN_ID}
@@ -290,6 +312,50 @@ def _voice_routes(app: FastAPI, state: _State) -> None:
                 422, f"No speech recognised in {seconds:.1f} s of audio: check the microphone."
             )
         return {"transcript": text, "seconds": round(seconds, 1)}
+
+
+def _item_routes(app: FastAPI, state: _State) -> None:
+    @app.post("/api/runs/{run_id}/items/{item_id}/translate")
+    async def translate(
+        run_id: str, item_id: str, language: Annotated[Language, Form()]
+    ) -> dict[str, Any]:
+        """The item's listing in another language, made once and kept in the pack."""
+        target, pack, item = state.item(run_id, item_id)
+        listing = item.analysis.listing
+        known = [listing, *item.translations]
+        done = next((text for text in known if text.language is language), None)
+        if done is not None:
+            return done.model_dump(mode="json")
+        state.require_live()
+        spark = build_services(state.settings, product_shots=False).spark
+        try:
+            result = await spark.translate(listing, language)
+        except OpenAIError as error:
+            raise HTTPException(502, f"Translation failed: {describe_error(error)}") from error
+        item.translations = [*item.translations, result.value]
+        item.calls = [*item.calls, result.call]
+        save_pack(target, pack)
+        await asyncio.to_thread(export_pack, target)
+        state.spent_usd += 0.0 if result.call.cached else result.call.cost_usd or 0.0
+        return result.value.model_dump(mode="json")
+
+    @app.post("/api/runs/{run_id}/items/{item_id}/ad")
+    async def video_ad(run_id: str, item_id: str) -> dict[str, str]:
+        """A 10 s vertical MP4 ad from the item's real shot; offline it has no hook line."""
+        target, pack, item = state.item(run_id, item_id)
+        if item.ad_video is None:
+            if not state.offline:
+                state.require_live()
+            spark = None if state.offline else build_services(state.settings).spark
+            try:
+                item.ad_video, call = await make_item_ad(spark, target, item)
+            except OpenAIError as error:
+                raise HTTPException(502, f"Video ad failed: {describe_error(error)}") from error
+            if call is not None:
+                item.calls = [*item.calls, call]
+                state.spent_usd += 0.0 if call.cached else call.cost_usd or 0.0
+            save_pack(target, pack)
+        return {"video": item.ad_video}
 
 
 def _agent_routes(app: FastAPI, state: _State) -> None:

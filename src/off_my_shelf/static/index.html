@@ -64,6 +64,14 @@
   .reply { border-left:3px solid var(--line); padding:4px 10px; font-size:14px; }
   .reply.ok { border-color:var(--sell); }
   .buyer { display:grid; gap:6px; }
+  .langs { display:flex; gap:6px; }
+  .ad video { width:100%; max-height:480px; background:#000; border-radius:10px; display:block; }
+  .card .actions { flex-wrap:wrap; }
+  .chip { min-height:32px; padding:4px 10px; font-size:12px; background:transparent; color:var(--muted);
+          border:1px solid var(--line); }
+  .chip.on { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .lot .strip { display:flex; gap:2px; background:var(--line); height:120px; }
+  .lot .strip img { flex:1; min-width:0; object-fit:cover; background:#fafafa; }
   .capture { display:none; gap:8px; flex:1 1 100%; }
   .pick { flex:1; display:flex; align-items:center; justify-content:center; font-weight:600;
           border-radius:10px; background:var(--sell); color:#fff; cursor:pointer; }
@@ -144,11 +152,13 @@ function log(text, kind = "") {
   return line.lastElementChild; // a live line (e.g. a recording timer) can update its text
 }
 
-async function shareListing(title, text, imageUrl) {
-  const blob = await (await fetch(imageUrl)).blob();
-  const file = new File([blob], "item.jpg", { type: blob.type || "image/jpeg" });
-  const data = navigator.canShare?.({ files: [file] }) ? { title, text, files: [file] } : { title, text };
-  await navigator.share(data);
+// Hand a pack file (photo or video ad) to another app; without a share sheet, download it.
+async function shareFile(url, filename, title, text) {
+  const blob = await (await fetch(url)).blob();
+  const file = new File([blob], filename, { type: blob.type });
+  if (navigator.canShare?.({ files: [file] })) return navigator.share({ title, text, files: [file] });
+  if (navigator.share) return navigator.share({ title, text });
+  el("a", { href: url, download: filename }).click();
 }
 
 function choose(files, add = false) {
@@ -157,6 +167,27 @@ function choose(files, add = false) {
     ? `${chosen.length} file(s): ${chosen.map((f) => f.name).join(", ")}`
     : "Drop photos or videos here, or click to choose";
   $("start").disabled = chosen.length === 0;
+}
+
+function bundleCard(bundle, crops) {
+  const copy = el("button", { type: "button", textContent: "Copy lot listing" });
+  const text = `${bundle.title}\n\n${bundle.description}\n\n${Math.round(bundle.price)} ${bundle.currency}`;
+  copy.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(text); copy.textContent = "Copied"; }
+    catch { copy.textContent = "Copy failed"; }
+  });
+  return el("article", { className: "card lot" }, [
+    el("div", { className: "strip" }, bundle.item_ids.map((id) =>
+      el("img", { src: crops[id], alt: id, loading: "lazy" }))),
+    el("div", { className: "body" }, [
+      el("div", { className: "row" }, [el("h2", { textContent: bundle.title }),
+        el("span", { className: "badge sell", textContent: `lot of ${bundle.item_ids.length}` })]),
+      el("span", { className: "price", textContent: `${Math.round(bundle.price)} ${bundle.currency}` }),
+      el("div", { className: "desc", textContent: bundle.description }),
+      el("div", { className: "muted", textContent: bundle.item_ids.join(", ") }),
+      el("div", { className: "actions" }, [copy]),
+    ]),
+  ]);
 }
 
 function card(item, base) {
@@ -170,20 +201,75 @@ function card(item, base) {
       el("figcaption", { textContent: item.product_shots[0].endsWith("-completed.jpg")
         ? "Hidden parts AI-completed" : "Clean shot, real pixels" })]));
   }
-  const text = `${a.listing.title}\n\n${a.listing.description}\n\n${money(a.price.suggested)}`;
+  // The listing in each language made so far; the chips switch it or ask for a translation.
+  const texts = Object.fromEntries([a.listing, ...item.translations].map((t) => [t.language, t]));
+  let shown = a.listing.language;
+  const title = el("h2", { textContent: a.listing.title });
+  const desc = el("div", { className: "desc", textContent: a.listing.description });
+  const textOf = () => `${texts[shown].title}\n\n${texts[shown].description}\n\n${money(a.price.suggested)}`;
+  const langs = el("div", { className: "langs" }, Object.keys(LANG_NAMES).map((code) => {
+    const chip = el("button", { type: "button", className: "chip" + (code === shown ? " on" : ""),
+      textContent: code.toUpperCase(), title: LANG_NAMES[code] });
+    chip.addEventListener("click", async () => {
+      if (!texts[code]) {
+        chip.textContent = "…";
+        const body = new FormData();
+        body.append("language", code);
+        try {
+          texts[code] = await postForm(`/api/runs/${current}/items/${item.item_id}/translate`, body);
+          log(`${item.item_id}: listing translated to ${LANG_NAMES[code]}`);
+        } catch (error) {
+          log(`Translation failed: ${error.message}`, "error");
+        }
+        chip.textContent = code.toUpperCase();
+        if (!texts[code]) return;
+      }
+      shown = code;
+      title.textContent = texts[code].title;
+      desc.textContent = texts[code].description;
+      langs.querySelectorAll(".chip").forEach((c) => c.classList.toggle("on", c === chip));
+    });
+    return chip;
+  }));
   const copy = el("button", { type: "button", textContent: "Copy listing" });
   copy.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(text); copy.textContent = "Copied"; }
+    try { await navigator.clipboard.writeText(textOf()); copy.textContent = "Copied"; }
     catch { copy.textContent = "Copy failed"; }
     setTimeout(() => (copy.textContent = "Copy listing"), 1500);
   });
   const actions = [copy];
   if (navigator.share) { // phones: hand the listing and its photo to a marketplace or chat app
     const share = el("button", { type: "button", className: "ghost", textContent: "Share" });
-    share.addEventListener("click", () => shareListing(a.listing.title, text,
-      base + (item.product_shots[0] || item.detection.crop_path)).catch(() => {}));
+    share.addEventListener("click", () => shareFile(base + (item.product_shots[0] ||
+      item.detection.crop_path), `${item.item_id}.jpg`, texts[shown].title, textOf()).catch(() => {}));
     actions.push(share);
   }
+  const ad = el("div", { className: "ad" });
+  const showAd = () => ad.replaceChildren(el("video", { src: base + item.ad_video, controls: true,
+    playsInline: true, preload: "metadata",
+    poster: base + (item.product_shots[0] || item.detection.crop_path) }));
+  if (item.ad_video) showAd();
+  const adButton = el("button", { type: "button", className: "ghost",
+    textContent: item.ad_video ? "Share video ad" : "Video ad" });
+  adButton.addEventListener("click", async () => {
+    adButton.disabled = true;
+    try {
+      if (item.ad_video) {
+        await shareFile(base + item.ad_video, `${item.item_id}.mp4`, texts[shown].title, textOf());
+      } else {
+        log(`${item.item_id}: making a 10 s video ad from its real photo…`, "muted");
+        item.ad_video = (await postForm(`/api/runs/${current}/items/${item.item_id}/ad`, new FormData())).video;
+        showAd();
+        adButton.textContent = "Share video ad";
+        log(`${item.item_id}: video ad ready`);
+      }
+    } catch (error) {
+      log(`Video ad failed: ${error.message}`, "error");
+    } finally {
+      adButton.disabled = false;
+    }
+  });
+  actions.push(adButton);
   const defects = a.condition.defects.length ? ` · ${a.condition.defects.join(", ")}` : "";
   const mode = item.pricing_mode ? ` · ${item.pricing_mode.replace("_", " ")}` : "";
   const replies = item.buyer_replies.map((reply, index) => {
@@ -207,7 +293,7 @@ function card(item, base) {
     el("div", { className: "photos" + (photos.length === 1 ? " single" : "") }, photos),
     el("div", { className: "body" }, [
       el("div", { className: "row" }, [
-        el("h2", { textContent: a.listing.title }),
+        title,
         el("span", { className: `badge ${a.triage.decision}`, textContent: a.triage.decision }),
       ]),
       el("div", { className: "row" }, [
@@ -216,8 +302,10 @@ function card(item, base) {
       ]),
       el("div", { className: "muted",
         textContent: `Condition: ${a.condition.grade.replace("_", " ")}${defects}` }),
-      el("div", { className: "desc", textContent: a.listing.description }),
+      langs,
+      desc,
       el("div", { className: "muted", textContent: a.triage.reason + mode }),
+      ad,
       el("div", { className: "actions" }, actions),
       el("div", { className: "buyer" }, [...replies, ask, draft]),
     ]),
@@ -237,7 +325,9 @@ function render(pack, base) {
   $("summary").textContent = `${items.length} items · ${selling.length} to sell, about ${Math.round(value)} €`;
   $("zip").href = `/api/runs/${current}/zip`;
   $("bar").hidden = false;
-  $("grid").replaceChildren(...items.map((item) => card(item, base)));
+  const crops = Object.fromEntries(items.map((i) => [i.item_id, base + i.detection.crop_path]));
+  $("grid").replaceChildren(...(pack.bundles || []).map((b) => bundleCard(b, crops)),
+    ...items.map((item) => card(item, base)));
   if (!items.length) log("No items found: try a closer photo.", "warn");
 }
 

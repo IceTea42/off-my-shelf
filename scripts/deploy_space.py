@@ -3,7 +3,8 @@
 A Gradio Space only runs ``app.py``; ours starts this project's own FastAPI app on the Space's
 port, so no Gradio UI is involved. Only files tracked by git are uploaded (never ``.env``,
 caches or packs), plus three generated files: the Space README header, ``app.py`` and
-``requirements.txt`` (the locked runtime dependencies and the project).
+``requirements.txt`` (the locked runtime dependencies). Packs and raw footage are never
+uploaded, even if tracked.
 
 Once:   uv run hf auth login                  (a token with "write" access)
 Deploy: uv run python scripts/deploy_space.py <user>/off-my-shelf --set-secrets --budget 10
@@ -13,11 +14,12 @@ import argparse
 import subprocess
 from pathlib import Path
 
-from huggingface_hub import CommitOperationAdd, HfApi
+from huggingface_hub import CommitOperationAdd, CommitOperationDelete, HfApi
 
 from off_my_shelf.config import get_settings
 
 ROOT = Path(__file__).resolve().parent.parent
+PRIVATE_DIRS = ("packs/", "data/raw/")  # runs and footage never go to the Space
 GRADIO_VERSION = "6.31.0"  # required by the Space header; the app does not import Gradio
 SPACE_HEADER = f"""---
 title: Off My Shelf
@@ -36,7 +38,10 @@ short_description: Film your shelf, get a ready-to-post listing for every item.
 APP_PY = '''"""Hugging Face Space entry point: serve the Off My Shelf web app on port 7860."""
 
 import os
+import sys
 
+# The Space installs requirements.txt before copying the repo, so the package runs from src/.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 os.environ.setdefault("OMS_HOST", "0.0.0.0")
 os.environ.setdefault("OMS_PORT", "7860")
 os.environ.setdefault("OMS_CACHE_DIR", "/tmp/off-my-shelf/cache")
@@ -60,8 +65,8 @@ def _git(*args: str) -> str:
 
 
 def requirements() -> str:
-    """The locked runtime dependencies as pip pins, then this project itself."""
-    pins = subprocess.run(
+    """The locked runtime dependencies, as pip pins."""
+    return subprocess.run(
         ["uv", "export", "--frozen", "--no-dev", "--no-hashes", "--no-emit-project"],  # noqa: S607
         cwd=ROOT,
         check=True,
@@ -69,12 +74,15 @@ def requirements() -> str:
         text=True,
         encoding="utf-8",
     ).stdout
-    return pins + ".\n"
 
 
 def space_operations() -> list[CommitOperationAdd]:
     """Tracked files plus the Space-only ones; README.md gets the Space header."""
-    tracked = [name for name in _git("ls-files", "-z").split("\0") if name]
+    tracked = [
+        name
+        for name in _git("ls-files", "-z").split("\0")
+        if name and not name.startswith(PRIVATE_DIRS)
+    ]
     readme = SPACE_HEADER + (ROOT / "README.md").read_text(encoding="utf-8")
     generated = {
         "README.md": readme,
@@ -109,10 +117,17 @@ def main(argv: list[str] | None = None) -> None:
         api.add_space_secret(args.space, "META_API_KEY", key.get_secret_value())
     if args.budget is not None:
         api.add_space_variable(args.space, "OMS_BUDGET_USD", f"{args.budget:g}")
+    uploads = space_operations()
+    keep = {op.path_in_repo for op in uploads} | {".gitattributes"}
+    stale = [  # files of earlier deploys that are gone or private now
+        CommitOperationDelete(path_in_repo=name)
+        for name in api.list_repo_files(args.space, repo_type="space")
+        if name not in keep
+    ]
     commit = api.create_commit(
         args.space,
         repo_type="space",
-        operations=space_operations(),
+        operations=[*uploads, *stale],
         commit_message=f"Deploy {_git('rev-parse', '--short', 'HEAD').strip()}",
     )
     print(f"pushed {commit.oid[:8]}: https://huggingface.co/spaces/{args.space}")

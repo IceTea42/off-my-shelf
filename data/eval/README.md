@@ -9,6 +9,15 @@ One photo per item, one row per photo in `items.csv`:
 | `brand` | brand if known, else empty |
 | `price_eur` | a real resale price: median of 3 sold or listed ads for the same item |
 
+Fastest way to build it from your own shelf runs:
+
+```
+uv run off-my-shelf eval-add packs/tea4      # adds each item crop with blank name/brand/price
+```
+
+Then fill `name`, `brand` and `price_eur` for each new row from real ads (rows left blank are
+skipped).
+
 Run it (costs about a cent per item):
 
 ```

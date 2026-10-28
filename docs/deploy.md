@@ -26,7 +26,11 @@ The Space `icetea/off-my-shelf` exists (private, CPU basic). Deploy or update it
 
 3. The Space builds in a few minutes. Open it, then check `/api/config` shows `"offline": false`.
 
-4. To make it public later: Space **Settings → Space Access control → Public**.
+4. Automatic updates: add the same write token as a GitHub Actions secret named `HF_TOKEN`
+   (repo **Settings → Secrets and variables → Actions**). CI then redeploys the Space after
+   every green push to `main`; secrets set in step 2 stay in place.
+
+5. To make it public later: Space **Settings → Space Access control → Public**.
 
 A private Space only opens for you while signed in to Hugging Face, also on the phone.
 

@@ -20,6 +20,11 @@ SAM_SAMPLE = (
 )
 SAM_SIZE = (320, 334)
 ANALYSIS_JSON = load_mock_pack().items[0].analysis.model_dump_json()
+TRANSLATION_JSON = (
+    '{"title": "Black articulated desk lamp, good condition", '
+    '"description": "Desk lamp with an articulated arm. Light scratches on the base.", '
+    '"tags": ["lamp", "desk"]}'
+)
 SHOT_OK = '{"same_item": true, "extra_objects": false, "added_defects": false, "reason": "ok"}'
 SHOT_BAD = '{"same_item": true, "extra_objects": false, "added_defects": true, "reason": "dent"}'
 
@@ -76,6 +81,10 @@ class FakeMetaClient:
         name = kwargs["response_format"]["json_schema"]["name"]
         if name == "SceneInventory":
             content = self.inventory_json
+        elif name == "AdCopy":
+            content = '{"hook": "Light up your desk for less"}'
+        elif name == "ListingText":
+            content = TRANSLATION_JSON
         elif name == "ShotCheck":
             content = self.shot_checks[min(len(self.image_calls), len(self.shot_checks)) - 1]
         else:

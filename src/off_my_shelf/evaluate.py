@@ -15,12 +15,17 @@ import statistics
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from PIL import Image
+
 from off_my_shelf.config import Settings
+from off_my_shelf.imaging import encode
+from off_my_shelf.mocks import load_pack
 from off_my_shelf.pipeline import Pipeline, Services
 from off_my_shelf.schema import Item
 
 WORD = re.compile(r"[\w']+", re.UNICODE)
 MATCH_THRESHOLD = 0.5
+EVAL_MAX_SIDE = 1280
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +58,34 @@ def load_truth(csv_path: Path) -> list[Truth]:
             price_eur=float(row["price_eur"]),
         )
         for row in rows
+        if row["price_eur"].strip()  # rows still to fill in are skipped
     ]
+
+
+CSV_FIELDS = ["image", "name", "brand", "price_eur"]
+
+
+def add_pack_to_eval(pack_dir: Path, csv_path: Path) -> list[str]:
+    """Add each item crop of a real run to the eval set, with name, brand and price left
+    blank for a person to fill in from real ads. Returns the model's names, as a reminder."""
+    pack = load_pack(pack_dir)
+    photos = csv_path.parent / "photos"
+    photos.mkdir(parents=True, exist_ok=True)
+    new = not csv_path.exists()
+    hints = []
+    with csv_path.open("a", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, CSV_FIELDS, lineterminator="\n")
+        if new:
+            writer.writeheader()
+        for item in pack.items:
+            name = f"{pack.run_id}-{item.item_id}.jpg"
+            with Image.open(pack_dir / item.detection.crop_path) as crop:
+                image = crop.convert("RGB")
+            image.thumbnail((EVAL_MAX_SIDE, EVAL_MAX_SIDE))
+            (photos / name).write_bytes(encode(image, quality=85))
+            writer.writerow({"image": f"photos/{name}", "name": "", "brand": "", "price_eur": ""})
+            hints.append(f"photos/{name}: model says {item.analysis.identification.name}")
+    return hints
 
 
 def _words(text: str) -> set[str]:

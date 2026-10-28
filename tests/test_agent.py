@@ -16,6 +16,7 @@ from off_my_shelf.agent import (
     AgentStepLimitError,
     ShelfAgent,
     asking_price,
+    check_bundle,
     check_buyer_reply,
     run_agent,
 )
@@ -189,3 +190,53 @@ def test_web_agent_needs_a_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         response = client.post("/api/runs/demo/agent", data={"goal": "sell fast"})
         assert response.status_code == 503
         assert "META_API_KEY" in response.json()["detail"]
+
+
+def test_bundle_checks() -> None:
+    third, fourth, recycle = PACK.items[2], PACK.items[3], PACK.items[4]  # floors 5 and 2
+    assert check_bundle([third, fourth], 5, set()) is None  # 0.7 x 7 = 4.9
+    assert "below the lot's floor" in (check_bundle([third, fourth], 4, set()) or "")
+    assert "two different" in (check_bundle([third], 5, set()) or "")
+    assert "recycle" in (check_bundle([third, recycle], 5, set()) or "")
+    assert "already in a lot" in (check_bundle([third, fourth], 5, {"item-003"}) or "")
+
+
+async def test_agent_makes_a_checked_lot(tmp_path: Path) -> None:
+    ids = ["item-003", "item-004"]
+    model = _ScriptedModel(
+        [
+            _reply(
+                _tool(
+                    "make_bundle",
+                    "b1",
+                    item_ids=ids,
+                    title="Kitchen lot",
+                    description="Two",
+                    price=2,
+                )
+            ),
+            _reply(
+                _tool(
+                    "make_bundle",
+                    "b2",
+                    item_ids=ids,
+                    title="Kitchen lot",
+                    description="Two",
+                    price=6,
+                )
+            ),
+            _reply(
+                _tool("make_bundle", "b3", item_ids=ids, title="Again", description="Two", price=6)
+            ),
+            _reply(_tool("finish", "b4", summary="Made a kitchen lot.")),
+        ]
+    )
+    agent = ShelfAgent(model, "muse-spark-1.3", DiskCache(tmp_path))  # type: ignore[arg-type]
+    result = await agent.run(PACK, "clear the kitchen fast")
+
+    assert [
+        b.model_dump(include={"bundle_id", "item_ids", "price"}) for b in result.pack.bundles
+    ] == [{"bundle_id": "lot-001", "item_ids": ids, "price": 6.0}]
+    assert result.actions[0].startswith("lot blocked by check (2 is below")
+    assert result.actions[1] == "lot-001: 2 items as 'Kitchen lot' at 6 EUR"
+    assert "already in a lot" in result.actions[2]

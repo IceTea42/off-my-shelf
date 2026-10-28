@@ -38,6 +38,57 @@
       "title": "BoundingBox",
       "type": "object"
     },
+    "Bundle": {
+      "additionalProperties": false,
+      "description": "Several low-value items sold together as one lot, at one price.",
+      "properties": {
+        "bundle_id": {
+          "pattern": "^lot-[0-9]{3}$",
+          "title": "Bundle Id",
+          "type": "string"
+        },
+        "item_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "title": "Item Ids",
+          "type": "array"
+        },
+        "title": {
+          "maxLength": 80,
+          "minLength": 3,
+          "title": "Title",
+          "type": "string"
+        },
+        "description": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "price": {
+          "minimum": 0.0,
+          "title": "Price",
+          "type": "number"
+        },
+        "currency": {
+          "default": "EUR",
+          "pattern": "^[A-Z]{3}$",
+          "title": "Currency",
+          "type": "string"
+        }
+      },
+      "required": [
+        "bundle_id",
+        "item_ids",
+        "title",
+        "description",
+        "price"
+      ],
+      "title": "Bundle",
+      "type": "object"
+    },
     "BuyerReply": {
       "additionalProperties": false,
       "description": "Sell-me-softly draft: never sent until a human approves it.",
@@ -269,6 +320,29 @@
             "$ref": "#/$defs/BuyerReply"
           },
           "title": "Buyer Replies",
+          "type": "array"
+        },
+        "ad_video": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "10 s vertical MP4 ad",
+          "title": "Ad Video"
+        },
+        "translations": {
+          "default": [],
+          "description": "The listing in other languages, one per language",
+          "items": {
+            "$ref": "#/$defs/ListingText"
+          },
+          "title": "Translations",
           "type": "array"
         },
         "calls": {
@@ -621,6 +695,14 @@
         "type": "string"
       },
       "title": "Warnings",
+      "type": "array"
+    },
+    "bundles": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Bundle"
+      },
+      "title": "Bundles",
       "type": "array"
     }
   },

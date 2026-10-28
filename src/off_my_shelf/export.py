@@ -36,14 +36,21 @@ def render_html(pack: ListingPack) -> str:
 
 
 def listing_text(pack: ListingPack) -> dict[str, str]:
-    """Ready-to-paste text per item, keyed by item id."""
+    """Ready-to-paste text per item (with its translations) and per bundle, keyed by id."""
     texts = {}
     for item in pack.items:
         a = item.analysis
-        texts[item.item_id] = (
-            f"{a.listing.title}\n\n{a.listing.description}\n\n"
-            f"Price: {a.price.suggested:.0f} {a.price.currency}\n"
-            f"Tags: {', '.join(a.listing.tags)}\n"
+        price = f"{a.price.suggested:.0f} {a.price.currency}"
+        texts[item.item_id] = "\n---\n\n".join(
+            f"[{listing.language.value}] {listing.title}\n\n{listing.description}\n\n"
+            f"Price: {price}\nTags: {', '.join(listing.tags)}\n"
+            for listing in [a.listing, *item.translations]
+        )
+    for bundle in pack.bundles:
+        texts[bundle.bundle_id] = (
+            f"{bundle.title}\n\n{bundle.description}\n\n"
+            f"Price: {bundle.price:.0f} {bundle.currency} for {len(bundle.item_ids)} items "
+            f"({', '.join(bundle.item_ids)})\n"
         )
     return texts
 

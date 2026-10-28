@@ -15,9 +15,14 @@ repository, and `git log --reverse` shows the work in the order it was done.
 | Shelf agent (tool calls, checked actions, buyer replies) | `agent.py` | Muse Spark, Voice Transcribe |
 | Web app (voice goals, spending cap) | `web.py`, `static/index.html` | all |
 | Cost and latency report | `report.py` | — |
-| Docs (deploy, tech report) | `docs/` | — |
+| Translations and lots | `spark.py`, `agent.py`, `web.py` | Muse Spark |
+| Video ads from real shots | `video_ad.py`, `fonts/` (DejaVu, free license) | Muse Spark |
+| Android app (PWA: camera, mic, share) | `static/manifest.webmanifest`, `static/sw.js` | — |
+| Hugging Face Space deploy | `scripts/deploy_space.py`, `.github/workflows/ci.yml` | — |
+| Docs (deploy, phone, tech report) | `docs/` | — |
 | Mini eval | `evaluate.py`, `data/eval/` | Muse Spark, SAM 3.1 |
 | Repo tooling (uv, pre-commit, CI on Windows + Ubuntu, Docker) | `pyproject.toml`, `.github/`, `Dockerfile` | — |
 
-Third-party libraries are used as published (see `pyproject.toml`); no code, data or assets
-from any employer or earlier project are included.
+Third-party libraries are used as published (see `pyproject.toml`); the DejaVu fonts are
+bundled under their own license (`src/off_my_shelf/fonts/LICENSE-DejaVu.txt`). No code, data or
+assets from any employer or earlier project are included.

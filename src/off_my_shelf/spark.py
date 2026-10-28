@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from off_my_shelf.cache import DiskCache, OfflineCacheMissError, cache_key
 from off_my_shelf.costs import token_cost
 from off_my_shelf.imaging import data_url, encode
-from off_my_shelf.schema import ItemAnalysis, Language, ModelCall, PipelineStep
+from off_my_shelf.schema import ItemAnalysis, Language, ListingText, ModelCall, PipelineStep
 
 MAX_SCENE_ITEMS = 12
 LANGUAGE_NAMES = {Language.EN: "English", Language.FR: "French", Language.TR: "Turkish"}
@@ -55,6 +55,13 @@ class SceneItem(BaseModel):
         max_length=24,
         description="1 or 2 lowercase English words naming the item, e.g. 'teapot', 'cake stand'.",
     )
+
+
+class AdCopy(BaseModel):
+    """The one line written on top of an item's video ad."""
+
+    model_config = ConfigDict(extra="forbid")
+    hook: str = Field(max_length=70)
 
 
 class ShotCheck(BaseModel):
@@ -206,6 +213,20 @@ Reply with one JSON object only, no prose, in exactly this shape:
 {skeleton}"""
 
 
+AD_SYSTEM = """You write the hook line of a 10-second vertical video ad for one second-hand \
+item, in {language}: at most 60 characters, catchy but honest (nothing that is not in the \
+listing), no emoji, no hashtags, no price.
+Reply with one JSON object only, no prose, in exactly this shape:
+{skeleton}"""
+
+
+TRANSLATE_SYSTEM = """You translate second-hand marketplace listings. Rewrite the listing in \
+{language}: keep every fact, number, brand and model name and defect; use the wording a local \
+seller would; title at most 80 characters; up to 8 tags in {language}.
+Reply with one JSON object only, no prose, in exactly this shape:
+{skeleton}"""
+
+
 SHOT_CHECK_SYSTEM = """You check AI-completed product photos for a second-hand marketplace. \
 Image 1 is the real item: {name}, with parts hidden behind other objects left blank. Image 2 is \
 the same photo where only those hidden parts were completed. Answer:
@@ -276,6 +297,26 @@ class SparkAnalyzer:
             fixed = result.value.model_copy(update={"listing": listing})
             return SparkResult(fixed, result.call)
         return result
+
+    async def translate(self, listing: ListingText, language: Language) -> SparkResult[ListingText]:
+        """The same listing in another language (text only, no image)."""
+        system = TRANSLATE_SYSTEM.format(
+            language=LANGUAGE_NAMES[language], skeleton=_skeleton(ListingText)
+        )
+        content = [{"type": "text", "text": listing.model_dump_json(exclude={"language"})}]
+        result = await self._structured(PipelineStep.ANALYZE, system, content, ListingText)
+        value = result.value.model_copy(update={"language": language})
+        return SparkResult(value, result.call)
+
+    async def ad_hook(self, listing: ListingText) -> SparkResult[AdCopy]:
+        """A short, honest hook for the item's video ad, in the listing's language."""
+        system = AD_SYSTEM.format(
+            language=LANGUAGE_NAMES[listing.language], skeleton=_skeleton(AdCopy)
+        )
+        content = [
+            {"type": "text", "text": listing.model_dump_json(include={"title", "description"})}
+        ]
+        return await self._structured(PipelineStep.ANALYZE, system, content, AdCopy)
 
     async def check_shot(
         self, real: Image.Image, shot: Image.Image, name: str, defects: list[str]
