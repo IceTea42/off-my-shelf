@@ -48,7 +48,16 @@ os.environ.setdefault("OMS_PORT", "7860")
 os.environ.setdefault("OMS_CACHE_DIR", "/tmp/off-my-shelf/cache")
 os.environ.setdefault("OMS_RUNS_DIR", "/tmp/off-my-shelf/runs")
 
+import spaces  # preinstalled on Hugging Face Spaces
+
 from off_my_shelf.cli import main
+
+
+@spaces.GPU
+def gpu_unused() -> None:
+    """Free Spaces run on ZeroGPU, which needs one GPU function at startup; this app has
+    none of its own, since every model runs behind the Meta Model API."""
+
 
 main(["serve"])
 '''
