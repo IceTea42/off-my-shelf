@@ -59,6 +59,8 @@ def gpu_unused() -> None:
     none of its own, since every model runs behind the Meta Model API."""
 
 
+if spaces.config.Config.zero_gpu:  # Gradio would report it at launch; this app is not Gradio
+    spaces.zero.startup()
 main(["serve"])
 '''
 
