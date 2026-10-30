@@ -1,6 +1,7 @@
 """Clients for the Meta Model API and for Muse Spark Open, both on the OpenAI wire protocol."""
 
 from openai import APIStatusError, AsyncOpenAI
+from pydantic import SecretStr
 
 from off_my_shelf.config import Settings
 
@@ -27,15 +28,23 @@ def make_client(settings: Settings) -> AsyncOpenAI:
     )
 
 
-def make_open_weights_client(settings: Settings) -> AsyncOpenAI:
-    """An async client for Muse Spark Open on the configured partner endpoint."""
-    if settings.spark_open_api_key is None:
-        raise MissingApiKeyError("BASETEN_API_KEY (or OMS_SPARK_OPEN_API_KEY)")
+def open_weight_endpoints(settings: Settings) -> list[tuple[str, str, SecretStr]]:
+    """Partner endpoints serving Muse Spark Open, in fallback order: (name, base URL, key)."""
+    endpoints = []
+    if settings.baseten_api_key is not None:
+        endpoints.append(("baseten", settings.baseten_base_url, settings.baseten_api_key))
+    if settings.modal_spark_open_url and settings.modal_spark_open_key is not None:
+        endpoints.append(("modal", settings.modal_spark_open_url, settings.modal_spark_open_key))
+    return endpoints
+
+
+def make_open_weights_client(settings: Settings, base_url: str, key: SecretStr) -> AsyncOpenAI:
+    """A client for one partner endpoint; one retry, since the next provider is the fallback."""
     return AsyncOpenAI(
-        api_key=settings.spark_open_api_key.get_secret_value(),
-        base_url=settings.spark_open_base_url,
+        api_key=key.get_secret_value(),
+        base_url=base_url,
         timeout=settings.request_timeout_s,
-        max_retries=3,
+        max_retries=1,
     )
 
 

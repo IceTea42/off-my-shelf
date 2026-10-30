@@ -1,15 +1,16 @@
 """End-to-end S1 pipeline on a fake Meta client: media in, validated pack out."""
 
+from dataclasses import replace
 from pathlib import Path
 
 import cv2
 import httpx2
 import numpy as np
 import pytest
-from openai import APIConnectionError
+from openai import APIConnectionError, InternalServerError
 from PIL import Image
 
-from fakes import SAM_SIZE, SHOT_BAD, SHOT_OK, FakeMetaClient
+from fakes import SAM_SIZE, SHOT_BAD, SHOT_OK, FakeMetaClient, fake_services
 from off_my_shelf import pipeline
 from off_my_shelf.cache import DiskCache, OfflineCacheMissError
 from off_my_shelf.cli import main
@@ -17,10 +18,8 @@ from off_my_shelf.config import Settings
 from off_my_shelf.media import UnsupportedMediaError, collect_inputs, stills
 from off_my_shelf.mocks import load_pack
 from off_my_shelf.pipeline import Pipeline, Services, build_services, slugify
-from off_my_shelf.product_shots import ProductPhotographer
-from off_my_shelf.sam import SamSegmenter
 from off_my_shelf.schema import Language
-from off_my_shelf.spark import SparkAnalyzer
+from off_my_shelf.spark import ListingChain, ListingProvider, SparkAnalyzer
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -30,18 +29,7 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def _services(client: FakeMetaClient, settings: Settings) -> Services:
-    cache = DiskCache(settings.cache_dir)
-    return Services(
-        sam=SamSegmenter(client, settings.sam_model, cache),  # type: ignore[arg-type]
-        spark=SparkAnalyzer(
-            client,  # type: ignore[arg-type]
-            settings.spark_model,
-            cache,
-            4000,
-            settings.reasoning_effort,
-        ),
-        photographer=ProductPhotographer(client, settings.image_model, cache),  # type: ignore[arg-type]
-    )
+    return fake_services(client, DiskCache(settings.cache_dir), photographer=True)
 
 
 def _photo(folder: Path, name: str = "shelf.png") -> Path:
@@ -240,18 +228,47 @@ def test_slugify() -> None:
     assert slugify("!!!") == "item"
 
 
-def test_spark_open_routes_analysis_to_partner(
+def test_listings_go_to_partners_first_then_meta(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("META_API_KEY", "meta")
     monkeypatch.setenv("BASETEN_API_KEY", "partner")
-    monkeypatch.setenv("OMS_USE_SPARK_OPEN", "true")
+    monkeypatch.setenv("MODAL_SPARK_OPEN_URL", "https://me--spark-open.modal.run/v1")
+    monkeypatch.setenv("MODAL_SPARK_OPEN_KEY", "modal")
     services = build_services(_settings(tmp_path))
-    assert services.spark.model == "meta-models/muse-spark-open-1026"
-    assert services.spark.client is not None
-    assert "baseten" in str(services.spark.client.base_url)
-    assert services.sam.client is not None
-    assert "meta.ai" in str(services.sam.client.base_url)
+    providers = services.listing.providers
+    assert [p.name for p in providers] == ["baseten", "modal", "meta"]
+    assert [p.analyzer.model for p in providers[:2]] == ["meta-models/muse-spark-open-1026"] * 2
+    assert "baseten" in str(providers[0].analyzer.client.base_url)  # type: ignore[union-attr]
+    assert "modal.run" in str(providers[1].analyzer.client.base_url)  # type: ignore[union-attr]
+    assert providers[2].analyzer is services.spark
+    assert services.sam.client is not None and "meta.ai" in str(services.sam.client.base_url)
+
+
+async def test_listing_falls_back_when_a_partner_fails(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _photo(tmp_path / "photos")
+    cache = DiskCache(settings.cache_dir)
+    services = fake_services(FakeMetaClient(["lamp"]), cache, photographer=True)
+    down = httpx2.Response(503, request=httpx2.Request("POST", "https://inference.baseten.co"))
+    broken = FakeMetaClient(["lamp"])
+
+    async def unavailable(**_: object) -> object:
+        raise InternalServerError("down", response=down, body=None)
+
+    broken.chat.completions.create = unavailable
+    partner = SparkAnalyzer(broken, "meta-models/muse-spark-open-1026", cache, 4000)  # type: ignore[arg-type]
+    chain = ListingChain([ListingProvider("baseten", partner), *services.listing.providers])
+    messages: list[str] = []
+    pack = await Pipeline(replace(services, listing=chain), settings, messages.append).run(
+        [tmp_path / "photos"], tmp_path / "out"
+    )
+
+    listing_call = next(
+        c for c in pack.items[0].calls if c.model == "muse-spark-1.3" and c.provider is None
+    )
+    assert listing_call is not None
+    assert any("fell back past baseten (InternalServerError)" in m for m in messages)
 
 
 def test_cli_offline_reports_cache_miss(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

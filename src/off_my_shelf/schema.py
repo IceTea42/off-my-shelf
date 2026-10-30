@@ -184,6 +184,9 @@ class ModelCall(_Model):
     output_tokens: Annotated[int, Field(ge=0)] | None = None
     cost_usd: Annotated[float, Field(ge=0.0)] | None = None
     latency_ms: Annotated[int, Field(ge=0)] | None = None
+    provider: str | None = Field(
+        default=None, description="Who served the model when not the Meta Model API"
+    )
 
 
 class BuyerReply(_Model):

@@ -28,15 +28,20 @@ class Settings(BaseSettings):
     sam_model: str = "sam-3.1"
     transcribe_model: str = "muse-voice-transcribe-1.0"
 
-    # Open-weight path: Muse Spark Open on a partner's OpenAI-compatible endpoint
-    use_spark_open: bool = False
+    # Open weights: the listing step runs on Muse Spark Open at each configured partner, in this
+    # order (Baseten, then Modal); Muse Spark on the Meta Model API is the last fallback.
     spark_open_model: str = "meta-models/muse-spark-open-1026"
-    spark_open_base_url: str = "https://inference.baseten.co/v1"
-    spark_open_api_key: SecretStr | None = Field(
+    baseten_base_url: str = "https://inference.baseten.co/v1"
+    baseten_api_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("BASETEN_API_KEY", "OMS_BASETEN_API_KEY")
+    )
+    modal_spark_open_url: str | None = Field(
         default=None,
-        validation_alias=AliasChoices(
-            "OMS_SPARK_OPEN_API_KEY", "BASETEN_API_KEY", "FIREWORKS_API_KEY"
-        ),
+        validation_alias=AliasChoices("MODAL_SPARK_OPEN_URL", "OMS_MODAL_SPARK_OPEN_URL"),
+    )
+    modal_spark_open_key: SecretStr | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MODAL_SPARK_OPEN_KEY", "OMS_MODAL_SPARK_OPEN_KEY"),
     )
 
     # Listings

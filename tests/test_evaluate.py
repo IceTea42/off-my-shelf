@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from fakes import SAM_SIZE, FakeMetaClient
+from fakes import SAM_SIZE, FakeMetaClient, fake_services
 from off_my_shelf.cache import DiskCache
 from off_my_shelf.cli import main
 from off_my_shelf.config import Settings
@@ -19,9 +19,6 @@ from off_my_shelf.evaluate import (
     summarise,
 )
 from off_my_shelf.mocks import MOCK_PACK_DIR, load_mock_pack
-from off_my_shelf.pipeline import Services
-from off_my_shelf.sam import SamSegmenter
-from off_my_shelf.spark import SparkAnalyzer
 
 LAMP = load_mock_pack().items[0]  # "Lampe de bureau articulée", 8..18, suggested 12
 
@@ -67,10 +64,7 @@ async def test_run_eval_writes_reports(tmp_path: Path) -> None:
     )  # type: ignore[call-arg]
     fake = FakeMetaClient(["desk lamp"])
     cache = DiskCache(settings.cache_dir)
-    services = Services(
-        sam=SamSegmenter(fake, "sam-3.1", cache),  # type: ignore[arg-type]
-        spark=SparkAnalyzer(fake, "muse-spark-1.3", cache, 4000),  # type: ignore[arg-type]
-    )
+    services = fake_services(fake, cache)
     summary = await run_eval(services, settings, csv_path, tmp_path / "report")
     assert summary["items"] == 1 and summary["identification_accuracy"] == 1.0
     report = (tmp_path / "report" / "report.md").read_text(encoding="utf-8")

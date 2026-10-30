@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAIError
 from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -462,3 +462,41 @@ def _merge_usage(first: dict[str, Any], second: dict[str, Any]) -> dict[str, Any
         if first.get(field) is not None and second.get(field) is not None:
             merged[field] = first[field] + second[field]
     return merged
+
+
+@dataclass(frozen=True, slots=True)
+class ListingProvider:
+    name: str  # "baseten", "modal" or "meta"
+    analyzer: SparkAnalyzer
+
+
+class ListingChain:
+    """The listing step across providers: each one in order until one answers.
+
+    Muse Spark Open on the partners comes first and Muse Spark on the Meta Model API last, so a
+    partner outage or rate limit only slows the run down instead of failing it.
+    """
+
+    def __init__(self, providers: Sequence[ListingProvider]) -> None:
+        if not providers:
+            raise ValueError("at least one listing provider is needed")
+        self.providers = list(providers)
+
+    async def analyze(
+        self, crop: Image.Image, language: Language
+    ) -> tuple[SparkResult[ItemAnalysis], list[str]]:
+        """The listing, and the providers that failed before it (for the run log)."""
+        failed: list[str] = []
+        for provider in self.providers:
+            try:
+                result = await provider.analyzer.analyze(crop, language)
+            except (OpenAIError, SparkReplyError, OfflineCacheMissError) as error:
+                failed.append(f"{provider.name} ({type(error).__name__})")
+                if provider is self.providers[-1]:
+                    raise
+                continue
+            label = None if provider.name == "meta" else provider.name
+            return SparkResult(
+                result.value, result.call.model_copy(update={"provider": label})
+            ), failed
+        raise AssertionError("unreachable: the last provider re-raises")

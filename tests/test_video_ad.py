@@ -8,14 +8,12 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from fakes import FakeMetaClient
+from fakes import FakeMetaClient, fake_services
 from off_my_shelf import video_ad, web
 from off_my_shelf.cache import DiskCache
 from off_my_shelf.cli import main
 from off_my_shelf.config import Settings
 from off_my_shelf.mocks import MOCK_PACK_DIR, load_mock_pack, load_pack
-from off_my_shelf.pipeline import Services
-from off_my_shelf.sam import SamSegmenter
 from off_my_shelf.spark import SparkAnalyzer
 
 
@@ -57,10 +55,7 @@ def test_web_and_cli(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         web,
         "build_services",
-        lambda *_, **__: Services(
-            sam=SamSegmenter(fake, "sam-3.1", cache),  # type: ignore[arg-type]
-            spark=SparkAnalyzer(fake, "muse-spark-1.3", cache, 4000),  # type: ignore[arg-type]
-        ),
+        lambda *_, **__: fake_services(fake, cache),
     )
     settings = Settings(  # type: ignore[call-arg]
         _env_file=None,

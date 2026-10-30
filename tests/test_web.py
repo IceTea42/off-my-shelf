@@ -13,14 +13,11 @@ from openai import InternalServerError
 from PIL import Image
 from pydantic import SecretStr
 
-from fakes import SAM_SIZE, FakeMetaClient
+from fakes import SAM_SIZE, FakeMetaClient, fake_services
 from off_my_shelf import web
 from off_my_shelf.cache import DiskCache
 from off_my_shelf.config import Settings
 from off_my_shelf.pipeline import Services
-from off_my_shelf.product_shots import ProductPhotographer
-from off_my_shelf.sam import SamSegmenter
-from off_my_shelf.spark import SparkAnalyzer
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -76,14 +73,10 @@ def test_upload_runs_the_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     fake = FakeMetaClient(["lamp"])
     cache = DiskCache(settings.cache_dir)
 
-    def fake_services(*_: object, **__: object) -> Services:
-        return Services(
-            sam=SamSegmenter(fake, "sam-3.1", cache),  # type: ignore[arg-type]
-            spark=SparkAnalyzer(fake, "muse-spark-1.3", cache, 4000),  # type: ignore[arg-type]
-            photographer=ProductPhotographer(fake, "muse-image-1.0", cache),  # type: ignore[arg-type]
-        )
+    def built(*_: object, **__: object) -> Services:
+        return fake_services(fake, cache, photographer=True)
 
-    monkeypatch.setattr(web, "build_services", fake_services)
+    monkeypatch.setattr(web, "build_services", built)
     with TestClient(web.create_app(settings)) as client:
         response = client.post(
             "/api/runs",
@@ -208,10 +201,7 @@ def test_share_target_starts_a_run(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(
         web,
         "build_services",
-        lambda *_, **__: Services(
-            sam=SamSegmenter(fake, "sam-3.1", cache),  # type: ignore[arg-type]
-            spark=SparkAnalyzer(fake, "muse-spark-1.3", cache, 4000),  # type: ignore[arg-type]
-        ),
+        lambda *_, **__: fake_services(fake, cache),
     )
     with TestClient(web.create_app(settings)) as client:
         shared = client.post(
@@ -227,10 +217,7 @@ def test_translate_once_then_from_the_pack(tmp_path: Path, monkeypatch: pytest.M
     monkeypatch.setattr(
         web,
         "build_services",
-        lambda *_, **__: Services(
-            sam=SamSegmenter(fake, "sam-3.1", DiskCache(tmp_path)),  # type: ignore[arg-type]
-            spark=SparkAnalyzer(fake, "muse-spark-1.3", DiskCache(tmp_path), 4000),  # type: ignore[arg-type]
-        ),
+        lambda *_, **__: fake_services(fake, DiskCache(tmp_path)),
     )
     settings = _settings(tmp_path).model_copy(update={"meta_api_key": SecretStr("test-key")})
     with TestClient(web.create_app(settings)) as client:

@@ -17,7 +17,7 @@ from pathlib import Path
 
 from huggingface_hub import CommitOperationAdd, CommitOperationDelete, HfApi
 
-from off_my_shelf.config import get_settings
+from off_my_shelf.config import Settings, get_settings
 
 ROOT = Path(__file__).resolve().parent.parent
 PRIVATE_DIRS = ("packs/", "data/raw/")  # runs and footage never go to the Space
@@ -109,20 +109,31 @@ def space_operations() -> list[CommitOperationAdd]:
     return operations
 
 
+def space_secrets(settings: Settings) -> dict[str, str]:
+    """The keys set in .env, by the names the app reads (partner keys only when present)."""
+    if settings.meta_api_key is None:
+        raise SystemExit("META_API_KEY is not set in .env")
+    secrets = {"META_API_KEY": settings.meta_api_key.get_secret_value()}
+    if settings.baseten_api_key is not None:
+        secrets["BASETEN_API_KEY"] = settings.baseten_api_key.get_secret_value()
+    if settings.modal_spark_open_url and settings.modal_spark_open_key is not None:
+        secrets["MODAL_SPARK_OPEN_URL"] = settings.modal_spark_open_url
+        secrets["MODAL_SPARK_OPEN_KEY"] = settings.modal_spark_open_key.get_secret_value()
+    return secrets
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("space", help="<user>/<space name>, e.g. ogem/off-my-shelf")
-    parser.add_argument("--set-secrets", action="store_true", help="copy META_API_KEY from .env")
+    parser.add_argument("--set-secrets", action="store_true", help="copy the API keys from .env")
     parser.add_argument("--budget", type=float, help="OMS_BUDGET_USD for the public app")
     args = parser.parse_args(argv)
 
     api = HfApi()
     api.create_repo(args.space, repo_type="space", space_sdk="gradio", exist_ok=True)
     if args.set_secrets:
-        key = get_settings().meta_api_key
-        if key is None:
-            raise SystemExit("META_API_KEY is not set in .env")
-        api.add_space_secret(args.space, "META_API_KEY", key.get_secret_value())
+        for name, value in space_secrets(get_settings()).items():
+            api.add_space_secret(args.space, name, value)
     if args.budget is not None:
         api.add_space_variable(args.space, "OMS_BUDGET_USD", f"{args.budget:g}")
     uploads = space_operations()

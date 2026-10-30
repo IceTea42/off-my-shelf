@@ -26,7 +26,7 @@ from off_my_shelf.imaging import (
     studio_canvas,
 )
 from off_my_shelf.media import Still, collect_inputs, stills
-from off_my_shelf.meta_client import make_client, make_open_weights_client
+from off_my_shelf.meta_client import make_client, make_open_weights_client, open_weight_endpoints
 from off_my_shelf.mocks import save_pack
 from off_my_shelf.product_shots import EmptyImageResponseError, ProductPhotographer
 from off_my_shelf.sam import SamSegmenter, Segment
@@ -39,7 +39,7 @@ from off_my_shelf.schema import (
     ModelCall,
     SourceRef,
 )
-from off_my_shelf.spark import SparkAnalyzer, SparkReplyError
+from off_my_shelf.spark import ListingChain, ListingProvider, SparkAnalyzer, SparkReplyError
 
 DUPLICATE_IOU = 0.6
 SHOT_ATTEMPTS = 2
@@ -53,6 +53,7 @@ Progress = Callable[[str], None]
 class Services:
     sam: SamSegmenter
     spark: SparkAnalyzer
+    listing: ListingChain
     photographer: ProductPhotographer | None = None
 
 
@@ -61,21 +62,31 @@ def build_services(
 ) -> Services:
     """Live services, or cache-only ones when ``offline`` (no key, no network, no cost).
 
-    With ``use_spark_open``, item analysis runs on Muse Spark Open at the partner endpoint;
-    segmentation and product shots stay on the Meta Model API.
+    Listings run on Muse Spark Open at each configured partner (Baseten, then Modal), with
+    Muse Spark on the Meta Model API as the last fallback; every other step uses the Meta API.
     """
     cache = DiskCache(settings.cache_dir)
     meta = None if offline else make_client(settings)
-    if settings.use_spark_open:
-        spark_client = None if offline else make_open_weights_client(settings)
-        spark_model, effort = settings.spark_open_model, None
-    else:
-        spark_client, spark_model = meta, settings.spark_model
-        effort = settings.reasoning_effort
+    spark = SparkAnalyzer(
+        meta, settings.spark_model, cache, settings.max_output_tokens, settings.reasoning_effort
+    )
+    partners = [
+        ListingProvider(
+            name,
+            SparkAnalyzer(
+                None if offline else make_open_weights_client(settings, url, key),
+                settings.spark_open_model,
+                cache,
+                settings.max_output_tokens,
+            ),
+        )
+        for name, url, key in open_weight_endpoints(settings)
+    ]
     photographer = ProductPhotographer(meta, settings.image_model, cache) if product_shots else None
     return Services(
         sam=SamSegmenter(meta, settings.sam_model, cache),
-        spark=SparkAnalyzer(spark_client, spark_model, cache, settings.max_output_tokens, effort),
+        spark=spark,
+        listing=ListingChain([*partners, ListingProvider("meta", spark)]),
         photographer=photographer,
     )
 
@@ -285,7 +296,9 @@ class Pipeline:
             (out_dir / rel).write_bytes(data)
 
         async with self._limit:
-            analysis = await self.services.spark.analyze(item_crop, language)
+            analysis, failed = await self.services.listing.analyze(item_crop, language)
+        if failed:
+            self.progress(f"{stem}: listing fell back past {', '.join(failed)}")
         canvas = studio_canvas(image, found.segment.mask, box)
         studio = _save(out_dir, f"shots/{stem}.jpg", encode(canvas.real, "JPEG", quality=92))
         item = Item(

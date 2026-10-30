@@ -512,6 +512,19 @@
           ],
           "default": null,
           "title": "Latency Ms"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Who served the model when not the Meta Model API",
+          "title": "Provider"
         }
       },
       "required": [

@@ -3,6 +3,10 @@
 import importlib.util
 from pathlib import Path
 
+from pydantic import SecretStr
+
+from off_my_shelf.config import Settings
+
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "deploy_space.py"
 
 
@@ -34,3 +38,14 @@ def test_modal_app_defines_the_web_endpoint() -> None:
     spec.loader.exec_module(modal_app)
     assert modal_app.app.name == "off-my-shelf"
     assert modal_app.BUDGET_USD == "10"
+
+
+def test_space_secrets_carry_partner_keys_when_set() -> None:
+    spec = importlib.util.spec_from_file_location("deploy_space", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    deploy = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(deploy)
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None, meta_api_key=SecretStr("m"), baseten_api_key=SecretStr("b")
+    )
+    assert deploy.space_secrets(settings) == {"META_API_KEY": "m", "BASETEN_API_KEY": "b"}

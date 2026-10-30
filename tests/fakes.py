@@ -8,8 +8,12 @@ from typing import Any
 
 from PIL import Image
 
+from off_my_shelf.cache import DiskCache
 from off_my_shelf.mocks import load_mock_pack
-from off_my_shelf.spark import SceneInventory
+from off_my_shelf.pipeline import Services
+from off_my_shelf.product_shots import ProductPhotographer
+from off_my_shelf.sam import SamSegmenter
+from off_my_shelf.spark import ListingChain, ListingProvider, SceneInventory, SparkAnalyzer
 
 # Two objects in a 320x334 image, in SAM 3.1's token format (from meta-sam-parser's docs).
 SAM_SAMPLE = (
@@ -105,3 +109,19 @@ class FakeMetaClient:
             yield SimpleNamespace(type="response.completed")
 
         return stream()
+
+
+def fake_services(client: FakeMetaClient, cache: DiskCache, photographer: bool = False) -> Services:
+    """Services wired to the fake client, with the default settings' models and reasoning
+    effort (so their cache matches ``build_services``); listings use the Meta-only chain."""
+    spark = SparkAnalyzer(client, "muse-spark-1.3", cache, 4000, "low")  # type: ignore[arg-type]
+    return Services(
+        sam=SamSegmenter(client, "sam-3.1", cache),  # type: ignore[arg-type]
+        spark=spark,
+        listing=ListingChain([ListingProvider("meta", spark)]),
+        photographer=(
+            ProductPhotographer(client, "muse-image-1.0", cache)  # type: ignore[arg-type]
+            if photographer
+            else None
+        ),
+    )

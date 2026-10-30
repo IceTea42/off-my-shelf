@@ -66,13 +66,19 @@ agent acts.
 A spending cap (`OMS_BUDGET_USD`) stops live work on a public deployment once reached; the
 bundled demo pack keeps working without any call.
 
-### 3.7 Built for the phone
+### 3.7 Open weights at partners, with fallbacks
+The listing step runs on Muse Spark Open, served by Baseten, with a Modal endpoint as the next
+provider and Muse Spark on the Meta Model API last. A partner outage or rate limit only moves a
+listing to the next provider (logged in the run, recorded per call), and the cost table shows
+which provider served each model.
+
+### 3.8 Built for the phone
 People declutter standing in front of a shelf, so the web app is an installable Android app
 (web app manifest, service worker): camera and video buttons, voice goals, the Android share
 sheet into the app (gallery photos start a run) and out of it (a listing with its photo, or a
 video ad, to a marketplace or chat app). No app store, one codebase for phone and desktop.
 
-### 3.8 Selling across languages and formats
+### 3.9 Selling across languages and formats
 A listing can be translated with one tap (Muse Spark, text only, cached per language). The agent
 can group low-value items into a lot, checked against 70 % of the items' floor prices. Each item
 can get a 10-second vertical video ad: its real product shot under a slow zoom, the price and a

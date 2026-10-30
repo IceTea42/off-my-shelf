@@ -22,7 +22,11 @@ from off_my_shelf.cache import DiskCache
 from off_my_shelf.config import Settings, get_settings
 from off_my_shelf.costs import token_cost
 from off_my_shelf.imaging import PixelBox, encode, load_image, pixel_lock, studio_canvas
-from off_my_shelf.meta_client import make_client, make_open_weights_client
+from off_my_shelf.meta_client import (
+    make_client,
+    make_open_weights_client,
+    open_weight_endpoints,
+)
 from off_my_shelf.mocks import MOCK_PACK_DIR
 from off_my_shelf.product_shots import ProductPhotographer
 from off_my_shelf.sam import SamSegmenter
@@ -91,21 +95,25 @@ async def smoke_vision(settings: Settings, args: argparse.Namespace) -> None:
 
 
 async def smoke_open(settings: Settings, args: argparse.Namespace) -> None:
-    """One listing from Muse Spark Open at the partner endpoint (open-weight bonus check)."""
-    analyzer = SparkAnalyzer(
-        make_open_weights_client(settings),
-        settings.spark_open_model,
-        DiskCache(settings.cache_dir),
-        settings.max_output_tokens,
-    )
+    """One listing from Muse Spark Open at each configured partner (Baseten, Modal)."""
+    endpoints = open_weight_endpoints(settings)
+    if not endpoints:
+        raise SystemExit("no partner configured: set BASETEN_API_KEY and/or MODAL_SPARK_OPEN_*")
     image = load_image(args.image, settings.max_image_side_px)
-    listing = await analyzer.analyze(image, settings.default_language)
-    print(f"model={settings.spark_open_model} at {settings.spark_open_base_url}")
-    print(f"title: {listing.value.listing.title!r} price: {listing.value.price.suggested}")
-    print(
-        f"tokens in={listing.call.input_tokens} out={listing.call.output_tokens} "
-        f"latency_ms={listing.call.latency_ms}"
-    )
+    for name, url, key in endpoints:
+        analyzer = SparkAnalyzer(
+            make_open_weights_client(settings, url, key),
+            settings.spark_open_model,
+            DiskCache(settings.cache_dir),
+            settings.max_output_tokens,
+        )
+        listing = await analyzer.analyze(image, settings.default_language)
+        print(f"{name}: model={settings.spark_open_model} at {url}")
+        print(f"  title: {listing.value.listing.title!r} price: {listing.value.price.suggested}")
+        print(
+            f"  tokens in={listing.call.input_tokens} out={listing.call.output_tokens} "
+            f"latency_ms={listing.call.latency_ms}"
+        )
 
 
 async def smoke_image(settings: Settings, args: argparse.Namespace) -> None:

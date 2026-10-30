@@ -58,7 +58,7 @@ flowchart LR
 | **SAM 3.1** | Finds and masks each listed item from its noun phrase |
 | **Muse Image 1.0** | Completes only the hidden parts of a partly covered item; every visible pixel stays the photo's own |
 | **Muse Voice Transcribe 1.0** | Turns a spoken goal ("sell fast, donate the books") into text for the agent |
-| **Muse Spark Open** (optional) | Runs the listing step on open weights at a partner endpoint (`OMS_USE_SPARK_OPEN=true`) |
+| **Muse Spark Open** | Writes the listings on open weights, served by Baseten (Modal as fallback); Muse Spark on the Meta API takes over if both are down |
 
 Every model result is cached on disk by input hash, so a re-run costs nothing and a demo
 replays without network.
