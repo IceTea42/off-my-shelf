@@ -4,7 +4,9 @@
 modes, triage changes and buyer-reply drafts. Every tool call is checked before it touches the
 pack (known item, legal values, a buyer reply never below the floor price and never pushing
 off-platform contact or payment), and the model sees each check's result, so it can correct
-itself. Buyer replies are drafts until a person approves them.
+itself. The person's seller policy (items never to sell, a maximum discount) is enforced by the
+same checks. In the web app the agent only proposes: a person picks which actions to apply, each
+action is checked again when applied, and an applied session can be undone.
 """
 
 import asyncio
@@ -16,7 +18,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import logfire
 from openai import AsyncOpenAI
+from pydantic import BaseModel, Field
 
 from off_my_shelf.cache import DiskCache, OfflineCacheMissError, cache_key
 from off_my_shelf.config import Settings
@@ -149,17 +153,39 @@ class AgentStepLimitError(RuntimeError):
     """The agent did not call finish within the step limit."""
 
 
-@dataclass
-class AgentResult:
-    pack: ListingPack
-    summary: str
-    actions: list[str] = field(default_factory=list)
-    calls: list[ModelCall] = field(default_factory=list)
+MUTATING_TOOLS = frozenset({"set_pricing_mode", "set_triage", "draft_buyer_reply", "make_bundle"})
 
 
-def floor_price(item: Item) -> float:
+class SellerPolicy(BaseModel):
+    """The person's own rules; every agent action is checked against them."""
+
+    never_sell: list[str] = Field(
+        default=[], description="Item ids or words of item titles the agent must leave alone"
+    )
+    max_discount: float | None = Field(
+        default=None, ge=0.0, le=0.9, description="Largest discount off the asking price"
+    )
+
+    def protects(self, item: Item) -> bool:
+        listing = item.analysis.listing
+        text = f"{item.item_id} {listing.title} {item.analysis.identification.name}".casefold()
+        return any(term.strip().casefold() in text for term in self.never_sell if term.strip())
+
+
+class AgentAction(BaseModel):
+    """One accepted tool call, replayable on the pack once a person approves it."""
+
+    tool: str
+    args: dict[str, Any]
+    text: str
+
+
+def floor_price(item: Item, policy: SellerPolicy | None = None) -> float:
     """The lowest price the agent may ever agree to for an item."""
-    return item.analysis.price.low
+    price = item.analysis.price
+    if policy is None or policy.max_discount is None:
+        return price.low
+    return max(price.low, float(round(price.suggested * (1 - policy.max_discount))))
 
 
 def asking_price(item: Item, mode: PricingMode) -> float:
@@ -168,11 +194,11 @@ def asking_price(item: Item, mode: PricingMode) -> float:
     return float(round(price.low + position * (price.high - price.low)))
 
 
-def check_buyer_reply(item: Item, reply: str) -> str | None:
+def check_buyer_reply(item: Item, reply: str, policy: SellerPolicy | None = None) -> str | None:
     """Why a draft reply is unacceptable, or None when it passes."""
     if OFF_PLATFORM.search(reply):
         return "keep contact and payment on the marketplace: no phone, email, link or transfer"
-    floor = floor_price(item)
+    floor = floor_price(item, policy)
     for match in PRICE.finditer(reply):
         amount = float((match.group(1) or match.group(2)).replace(",", "."))
         if amount < floor:
@@ -199,12 +225,14 @@ def check_bundle(items: list[Item], price: float, already_bundled: set[str]) -> 
 class _Session:
     """Tool implementations over one pack; each returns the text the model sees."""
 
-    def __init__(self, pack: ListingPack) -> None:
+    def __init__(self, pack: ListingPack, policy: SellerPolicy | None = None) -> None:
         self.items = {item.item_id: item.model_copy(deep=True) for item in pack.items}
         self.order = [item.item_id for item in pack.items]
         self.pack = pack
+        self.policy = policy or SellerPolicy()
         self.bundles = [bundle.model_copy(deep=True) for bundle in pack.bundles]
         self.actions: list[str] = []
+        self.accepted: list[AgentAction] = []
         self.summary: str | None = None
 
     def result(self) -> ListingPack:
@@ -224,14 +252,22 @@ class _Session:
         if handler is None:
             return f"error: unknown tool {name}"
         try:
-            return handler(**args)
+            output = handler(**args)
         except (TypeError, ValueError, KeyError) as error:
             return f"error: {error}"
+        if name in MUTATING_TOOLS and output.startswith("ok"):
+            self.accepted.append(AgentAction(tool=name, args=args, text=self.actions[-1]))
+        return output
 
     def _item(self, item_id: str) -> Item:
         if item_id not in self.items:
             raise KeyError(f"unknown item_id {item_id!r}; call list_items")
-        return self.items[item_id]
+        item = self.items[item_id]
+        if self.policy.protects(item):
+            message = f"{item_id} is on the seller's never-sell list: leave it alone"
+            self.actions.append(f"{item_id}: blocked by check (never-sell list)")
+            raise ValueError(message)
+        return item
 
     def list_items(self) -> str:
         rows = []
@@ -252,6 +288,7 @@ class _Session:
                     "triage": a.triage.decision.value,
                     "pricing_mode": self.items[item_id].pricing_mode,
                     "bundle": self._bundle_of(item_id),
+                    "never_sell": self.policy.protects(self.items[item_id]),
                 }
             )
         return json.dumps(rows, ensure_ascii=False)
@@ -277,7 +314,7 @@ class _Session:
 
     def draft_buyer_reply(self, item_id: str, buyer_message: str, reply: str) -> str:
         item = self._item(item_id)
-        problem = check_buyer_reply(item, reply)
+        problem = check_buyer_reply(item, reply, self.policy)
         if problem:
             self.actions.append(f"{item_id}: reply blocked by check ({problem}), rewriting")
             return f"rejected: {problem}. Write a new reply."
@@ -317,6 +354,25 @@ class _Session:
         return "ok"
 
 
+@dataclass
+class AgentResult:
+    pack: ListingPack
+    summary: str
+    actions: list[str] = field(default_factory=list)  # the trail, blocked attempts included
+    calls: list[ModelCall] = field(default_factory=list)
+    accepted: list[AgentAction] = field(default_factory=list)  # what passed every check
+
+
+def apply_actions(
+    pack: ListingPack, actions: list[AgentAction], policy: SellerPolicy | None = None
+) -> tuple[ListingPack, list[str]]:
+    """Replay approved actions on the pack; each one is checked again before it applies."""
+    session = _Session(pack, policy)
+    for action in actions:
+        session.dispatch(action.tool, action.args)
+    return session.result(), session.actions
+
+
 class ShelfAgent:
     """Tool-calling loop on Muse Spark; ``client=None`` replays a cached session offline."""
 
@@ -333,19 +389,30 @@ class ShelfAgent:
         self.reasoning_effort = reasoning_effort
 
     async def run(
-        self, pack: ListingPack, goal: str, buyer_messages: dict[str, str] | None = None
+        self,
+        pack: ListingPack,
+        goal: str,
+        buyer_messages: dict[str, str] | None = None,
+        policy: SellerPolicy | None = None,
     ) -> AgentResult:
-        session = _Session(pack)
+        session = _Session(pack, policy)
         request = goal.strip()
         for item_id, buyer_message in (buyer_messages or {}).items():
             request += f"\nBuyer message about {item_id}: {buyer_message}"
+        if policy is not None and policy.never_sell:
+            request += (
+                f"\nSeller policy: never sell, price or reply about: {', '.join(policy.never_sell)}"
+            )
+        if policy is not None and policy.max_discount is not None:
+            request += f"\nSeller policy: at most {policy.max_discount:.0%} off any asking price"
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": AGENT_SYSTEM},
             {"role": "user", "content": request},
         ]
         calls: list[ModelCall] = []
-        for _ in range(MAX_STEPS):
-            message, call = await self._step(messages)
+        for step in range(MAX_STEPS):
+            with logfire.span("agent step {step}", step=step):
+                message, call = await self._step(messages)
             calls.append(call)
             messages.append(message)
             tool_calls = message.get("tool_calls") or []
@@ -360,6 +427,7 @@ class ShelfAgent:
                     output = "error: arguments are not valid JSON"
                 else:
                     output = session.dispatch(function["name"], args)
+                logfire.info("tool {tool}", tool=function["name"], args=args, result=output)
                 messages.append(
                     {"role": "tool", "tool_call_id": tool_call["id"], "content": output}
                 )
@@ -367,7 +435,9 @@ class ShelfAgent:
                 break
         else:
             raise AgentStepLimitError(f"no finish after {MAX_STEPS} steps")
-        return AgentResult(session.result(), session.summary or "Done.", session.actions, calls)
+        return AgentResult(
+            session.result(), session.summary or "Done.", session.actions, calls, session.accepted
+        )
 
     async def _step(self, messages: list[dict[str, Any]]) -> tuple[dict[str, Any], ModelCall]:
         key = cache_key("agent", self.model, TOOLS, messages)
@@ -436,6 +506,7 @@ class AgentRequest:
     goal: str = ""
     voice: bytes | None = None
     buyer_messages: dict[str, str] = field(default_factory=dict)
+    policy: SellerPolicy | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -443,12 +514,19 @@ class AgentOutcome:
     goal: str
     actions: list[str]
     summary: str
+    proposal: list[AgentAction]
+    cost_usd: float
 
 
 async def run_agent(
-    settings: Settings, pack_dir: Path, request: AgentRequest, offline: bool = False
+    settings: Settings,
+    pack_dir: Path,
+    request: AgentRequest,
+    offline: bool = False,
+    apply: bool = True,
 ) -> AgentOutcome:
-    """Run the shelf agent on a saved pack, then save and re-export it."""
+    """Run the shelf agent on a saved pack. With ``apply`` the accepted actions are saved and
+    the pack re-exported; without it they are only proposed, for a person to pick."""
     client = None if offline else make_client(settings)
     cache = DiskCache(settings.cache_dir)
     goal = request.goal.strip()
@@ -459,7 +537,10 @@ async def run_agent(
     if not goal and not request.buyer_messages:
         raise ValueError("give the agent a goal, a voice note or a buyer message")
     agent = ShelfAgent(client, settings.spark_model, cache, settings.reasoning_effort)
-    result = await agent.run(load_pack(pack_dir), goal, request.buyer_messages)
-    save_pack(pack_dir, result.pack)
-    await asyncio.to_thread(export_pack, pack_dir)
-    return AgentOutcome(goal, result.actions, result.summary)
+    with logfire.span("agent session", goal=goal):
+        result = await agent.run(load_pack(pack_dir), goal, request.buyer_messages, request.policy)
+    if apply:
+        save_pack(pack_dir, result.pack)
+        await asyncio.to_thread(export_pack, pack_dir)
+    cost = sum(c.cost_usd or 0.0 for c in result.calls if not c.cached)
+    return AgentOutcome(goal, result.actions, result.summary, result.accepted, cost)

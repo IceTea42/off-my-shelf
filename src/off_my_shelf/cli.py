@@ -13,6 +13,7 @@ from off_my_shelf.mocks import load_pack, save_pack
 from off_my_shelf.pipeline import Pipeline, build_services
 from off_my_shelf.report import markdown_table
 from off_my_shelf.schema import Language, TriageDecision
+from off_my_shelf.tracing import setup_tracing
 from off_my_shelf.video_ad import make_item_ad
 
 
@@ -154,6 +155,7 @@ def main(argv: list[str] | None = None) -> None:
     serve.set_defaults(handler=_serve)
 
     args = parser.parse_args(argv)
+    setup_tracing()
     args.handler(args)
 
 

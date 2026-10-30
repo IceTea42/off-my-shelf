@@ -7,6 +7,7 @@ runs offline: cached runs and the bundled demo pack still work.
 import asyncio
 import logging
 import mimetypes
+import re
 import shutil
 import uuid
 from collections.abc import Callable
@@ -20,8 +21,15 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAIError
+from pydantic import BaseModel, Field
 
-from off_my_shelf.agent import AgentRequest, run_agent
+from off_my_shelf.agent import (
+    AgentAction,
+    AgentRequest,
+    SellerPolicy,
+    apply_actions,
+    run_agent,
+)
 from off_my_shelf.cache import DiskCache
 from off_my_shelf.config import Settings, get_settings
 from off_my_shelf.demo import demo_pack_dir
@@ -32,6 +40,7 @@ from off_my_shelf.mocks import load_pack, save_pack
 from off_my_shelf.pipeline import Pipeline, build_services
 from off_my_shelf.report import live_cost
 from off_my_shelf.schema import Item, Language, ListingPack
+from off_my_shelf.tracing import trace_app
 from off_my_shelf.video_ad import make_item_ad
 from off_my_shelf.voice import AudioFormatError, Transcriber, to_api_wav, wav_seconds
 
@@ -58,6 +67,36 @@ class Run:
     messages: list[str] = field(default_factory=list)
     error: str | None = None
     pipeline: Pipeline | None = None
+
+
+class AgentForm(BaseModel):
+    """The agent panel: a goal and/or a buyer message, and the seller's own rules."""
+
+    goal: str = ""
+    buyer_item_id: str = ""
+    buyer_message: str = ""
+    never_sell: str = ""  # comma- or line-separated item ids or words of titles
+    max_discount_pct: float | None = Field(default=None, ge=0, le=90)
+
+    def policy(self) -> SellerPolicy:
+        terms = [term.strip() for term in re.split(r"[,\n]", self.never_sell) if term.strip()]
+        discount = None if self.max_discount_pct is None else self.max_discount_pct / 100
+        return SellerPolicy(never_sell=terms, max_discount=discount)
+
+
+class Proposal(BaseModel):
+    """What the agent proposed in one session, kept until a person applies or replaces it."""
+
+    policy: SellerPolicy
+    actions: list[AgentAction]
+
+
+PROPOSAL_FILE = "proposal.json"
+
+
+def _agent_dir(pack_dir: Path) -> Path:
+    """Agent proposals and undo snapshots, next to the pack (not inside it, nor in its zip)."""
+    return pack_dir.parent / "agent"
 
 
 def _voice_keeper(settings: Settings, suffix: str) -> Callable[[str, bytes], None]:
@@ -168,6 +207,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     state = _State(settings or get_settings())
     state.settings.runs_dir.mkdir(parents=True, exist_ok=True)
     app = FastAPI(title="Off My Shelf")
+    trace_app(app)
     app.mount("/runs", StaticFiles(directory=state.settings.runs_dir), name="runs")
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     _page_routes(app, state)
@@ -175,6 +215,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     _voice_routes(app, state)
     _item_routes(app, state)
     _agent_routes(app, state)
+    _proposal_routes(app, state)
     return app
 
 
@@ -360,37 +401,76 @@ def _item_routes(app: FastAPI, state: _State) -> None:
         return {"video": item.ad_video}
 
 
+def _proposal_routes(app: FastAPI, state: _State) -> None:
+    @app.post("/api/runs/{run_id}/agent/apply")
+    async def apply_proposal(run_id: str, selected: Annotated[str, Form()] = "") -> dict[str, Any]:
+        """Apply the actions a person picked (indexes into the proposal), checked again."""
+        target = state.finished(run_id)
+        proposal_file = _agent_dir(target) / PROPOSAL_FILE
+        if not proposal_file.is_file():
+            raise HTTPException(404, "no proposal to apply")
+        proposal = Proposal.model_validate_json(proposal_file.read_text(encoding="utf-8"))
+        picks = {int(i) for i in selected.split(",") if i.strip().isdigit()}
+        chosen = [a for n, a in enumerate(proposal.actions) if n in picks]
+        pack = load_pack(target)
+        history = _agent_dir(target) / "history"
+        history.mkdir(exist_ok=True)
+        (history / f"{len(list(history.glob('*.json'))):03d}.json").write_text(
+            pack.model_dump_json(), encoding="utf-8"
+        )
+        applied, log = apply_actions(pack, chosen, proposal.policy)
+        save_pack(target, applied)
+        proposal_file.unlink()
+        await asyncio.to_thread(export_pack, target)
+        return {"actions": log, "pack": applied.model_dump(mode="json"), "can_undo": True}
+
+    @app.post("/api/runs/{run_id}/agent/undo")
+    async def undo(run_id: str) -> dict[str, Any]:
+        """Put the pack back as it was before the last applied agent session."""
+        target = state.finished(run_id)
+        snapshots = sorted((_agent_dir(target) / "history").glob("*.json"))
+        if not snapshots:
+            raise HTTPException(404, "nothing to undo")
+        pack = ListingPack.model_validate_json(snapshots[-1].read_text(encoding="utf-8"))
+        save_pack(target, pack)
+        snapshots[-1].unlink()
+        await asyncio.to_thread(export_pack, target)
+        return {"pack": pack.model_dump(mode="json"), "can_undo": len(snapshots) > 1}
+
+
 def _agent_routes(app: FastAPI, state: _State) -> None:
     @app.post("/api/runs/{run_id}/agent")
-    async def agent(
-        run_id: str,
-        goal: Annotated[str, Form()] = "",
-        buyer_item_id: Annotated[str, Form()] = "",
-        buyer_message: Annotated[str, Form()] = "",
-    ) -> dict[str, Any]:
-        """Let the agent act on a finished run from a goal and/or a buyer message."""
+    async def agent(run_id: str, form: Annotated[AgentForm, Form()]) -> dict[str, Any]:
+        """The agent proposes checked actions; nothing changes until a person applies them."""
         target = state.finished(run_id)
         state.require_live()
-        before = live_cost(load_pack(target))
+        policy = form.policy()
         request = AgentRequest(
-            goal=goal,
+            goal=form.goal,
             buyer_messages=(
-                {buyer_item_id: buyer_message} if buyer_item_id and buyer_message else {}
+                {form.buyer_item_id: form.buyer_message}
+                if form.buyer_item_id and form.buyer_message
+                else {}
             ),
+            policy=policy,
         )
         try:
-            outcome = await run_agent(state.settings, target, request)
+            outcome = await run_agent(state.settings, target, request, apply=False)
         except Exception as error:
             detail = describe_error(error)
             logger.exception("agent failed: %s", detail)
             raise HTTPException(502, f"Agent failed: {detail}") from error
-        pack = load_pack(target)
-        state.spent_usd += max(live_cost(pack) - before, 0.0)
+        state.spent_usd += outcome.cost_usd
+        _agent_dir(target).mkdir(exist_ok=True)
+        (_agent_dir(target) / PROPOSAL_FILE).write_text(
+            Proposal(policy=policy, actions=outcome.proposal).model_dump_json(),
+            encoding="utf-8",
+        )
         return {
             "goal": outcome.goal,
             "actions": outcome.actions,
             "summary": outcome.summary,
-            "pack": pack.model_dump(mode="json"),
+            "proposal": [action.text for action in outcome.proposal],
         }
 
     @app.post("/api/runs/{run_id}/items/{item_id}/replies/{index}/approve")

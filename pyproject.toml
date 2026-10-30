@@ -15,6 +15,7 @@ dependencies = [
     "av>=19.0.2",
     "fastapi>=0.162.0",
     "jinja2>=3.1.6",
+    "logfire[fastapi]>=5.4.0",
     "meta-sam-parser>=0.1.0",
     "numpy>=2.5.4",
     "openai>=3.39.0",
@@ -100,3 +101,6 @@ branch = true
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
+
+[tool.logfire]
+ignore_no_config = true

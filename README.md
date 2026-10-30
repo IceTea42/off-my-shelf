@@ -79,7 +79,11 @@ uv run python -m off_my_shelf.smoke spark                     # one live call pe
 
 ## Safety by design
 
+- The agent proposes, a person decides: its checked actions are listed with checkboxes, only
+  the picked ones apply (each checked again), and the last applied session can be undone.
+- Your rules bind it: items you never want to sell, and the largest discount you accept.
 - Buyer replies are drafts: the agent cannot send anything, a person approves each one.
+- Every model call and agent step can be traced in Pydantic Logfire (set `LOGFIRE_TOKEN`).
 - Every agent action is checked before it applies: a reply is rejected if it goes below the
   item's floor price or moves contact or payment off the marketplace, a lot if it goes below 70 %
   of its items' floors, and the agent is told why and tries again.

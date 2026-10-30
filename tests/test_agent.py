@@ -11,19 +11,23 @@ from fastapi.testclient import TestClient
 
 from off_my_shelf import web
 from off_my_shelf.agent import (
+    AgentAction,
     AgentOutcome,
     AgentRequest,
     AgentStepLimitError,
+    SellerPolicy,
     ShelfAgent,
+    apply_actions,
     asking_price,
     check_bundle,
     check_buyer_reply,
+    floor_price,
     run_agent,
 )
 from off_my_shelf.cache import DiskCache, OfflineCacheMissError
 from off_my_shelf.config import Settings
-from off_my_shelf.mocks import MOCK_PACK_DIR, load_mock_pack, load_pack, save_pack
-from off_my_shelf.schema import BuyerReply, PricingMode, TriageDecision
+from off_my_shelf.mocks import MOCK_PACK_DIR, load_mock_pack, load_pack
+from off_my_shelf.schema import PricingMode, TriageDecision
 
 PACK = load_mock_pack()
 FIRST = PACK.items[0]  # lamp, low 8, high 18
@@ -145,18 +149,29 @@ async def test_run_agent_saves_pack_and_needs_a_goal(tmp_path: Path) -> None:
     assert load_pack(pack_dir) == PACK
 
 
-def test_web_agent_and_approval(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_web_agent_proposes_then_applies_selected_and_undoes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[AgentRequest] = []
+
     async def fake_run_agent(
-        _settings: Settings, pack_dir: Path, request: AgentRequest, **_: object
+        _settings: Settings, pack_dir: Path, request: AgentRequest, **kwargs: object
     ) -> AgentOutcome:
-        pack = load_pack(pack_dir)
-        lamp = pack.items[0]
-        lamp.buyer_replies = [
-            *lamp.buyer_replies,
-            BuyerReply(buyer_message="Still there?", draft_reply="Yes!"),
+        assert kwargs == {"apply": False}
+        seen.append(request)
+        proposal = [
+            AgentAction(
+                tool="set_pricing_mode",
+                args={"item_id": "item-001", "mode": "sell_fast", "reason": "moving"},
+                text="item-001: sell_fast at 10 EUR",
+            ),
+            AgentAction(
+                tool="draft_buyer_reply",
+                args={"item_id": "item-001", "buyer_message": "Still there?", "reply": "Yes!"},
+                text="item-001: reply drafted, waiting for approval",
+            ),
         ]
-        save_pack(pack_dir, pack)
-        return AgentOutcome(request.goal, ["item-001: reply drafted"], "Drafted one reply.")
+        return AgentOutcome(request.goal, [a.text for a in proposal], "Two ideas.", proposal, 0.0)
 
     monkeypatch.setattr(web, "run_agent", fake_run_agent)
     monkeypatch.setenv("META_API_KEY", "test-key")
@@ -166,17 +181,55 @@ def test_web_agent_and_approval(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     with TestClient(web.create_app(settings)) as client:
         assert client.post("/api/runs/demo/agent", data={"goal": "x"}).status_code == 404
         client.post("/api/demo")
-        response = client.post("/api/runs/demo/agent", data={"goal": "Sell fast"})
-        assert response.status_code == 200, response.text
-        body = response.json()
-        assert body["summary"] == "Drafted one reply."
-        replies = body["pack"]["items"][0]["buyer_replies"]
-        index = len(replies) - 1
+        form = {"goal": "Sell fast", "never_sell": "pokemon, item-005", "max_discount_pct": "20"}
+        body = client.post("/api/runs/demo/agent", data=form).json()
+        assert body["proposal"] == [
+            "item-001: sell_fast at 10 EUR",
+            "item-001: reply drafted, waiting for approval",
+        ]
+        assert seen[0].policy == SellerPolicy(never_sell=["pokemon", "item-005"], max_discount=0.2)
+        before = client.get("/api/runs/demo").json()["pack"]
+        assert before["items"][0]["analysis"]["price"]["suggested"] == 12  # nothing applied yet
+
+        applied = client.post("/api/runs/demo/agent/apply", data={"selected": "1"}).json()
+        lamp = applied["pack"]["items"][0]
+        assert lamp["analysis"]["price"]["suggested"] == 12  # pricing was not picked
+        assert lamp["buyer_replies"][-1]["draft_reply"] == "Yes!"
+        assert applied["actions"] == ["item-001: reply drafted, waiting for approval"]
+        assert client.post("/api/runs/demo/agent/apply").status_code == 404  # used up
+
+        index = len(lamp["buyer_replies"]) - 1
         approve = client.post(f"/api/runs/demo/items/item-001/replies/{index}/approve")
         assert approve.json() == {"approved": True}
-        pack = client.get("/api/runs/demo").json()["pack"]
-        assert pack["items"][0]["buyer_replies"][index]["approved"] is True
         assert client.post("/api/runs/demo/items/item-001/replies/99/approve").status_code == 404
+
+        undone = client.post("/api/runs/demo/agent/undo").json()
+        assert undone["pack"] == before and undone["can_undo"] is False
+        assert client.post("/api/runs/demo/agent/undo").status_code == 404
+
+
+def test_policy_blocks_never_sell_items_and_deep_discounts() -> None:
+    policy = SellerPolicy(never_sell=["lampe"], max_discount=0.1)
+    pack, log = apply_actions(
+        PACK,
+        [
+            AgentAction(
+                tool="set_triage",
+                args={"item_id": "item-001", "decision": "donate", "reason": "x"},
+                text="",
+            ),
+            AgentAction(
+                tool="draft_buyer_reply",
+                args={"item_id": "item-002", "buyer_message": "8?", "reply": "Ok for 9 €"},
+                text="",
+            ),
+        ],
+        policy,
+    )
+    assert pack.items[0] == PACK.items[0]  # "Lampe ..." is on the never-sell list
+    assert log[0] == "item-001: blocked by check (never-sell list)"
+    assert "9 is below this item's floor of 11" in log[1]  # 12 asking, at most 10 % off
+    assert floor_price(PACK.items[1], policy) == 11 and floor_price(PACK.items[1]) == 6
 
 
 def test_web_agent_needs_a_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

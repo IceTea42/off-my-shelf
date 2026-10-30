@@ -65,6 +65,11 @@
   .reply.ok { border-color:var(--sell); }
   .buyer { display:grid; gap:6px; }
   .langs { display:flex; gap:6px; }
+  .rules summary { cursor:pointer; color:var(--muted); font-size:14px; }
+  .rules label { display:grid; gap:4px; margin-top:8px; font-size:13px; color:var(--muted); }
+  .rules input { font:inherit; padding:8px 10px; border-radius:10px; border:1px solid var(--line); }
+  #proposal { display:grid; gap:6px; border-top:1px solid var(--line); padding-top:10px; }
+  .pick-action { display:flex; gap:8px; align-items:flex-start; font-size:14px; }
   #sources { display:flex; gap:12px; overflow-x:auto; margin:0 0 16px; }
   .source { position:relative; flex:0 0 auto; max-width:100%; aspect-ratio:auto; background:none; }
   .source img { display:block; max-height:360px; max-width:100%; width:auto; height:auto;
@@ -128,10 +133,19 @@
   <section class="agent" id="agent" hidden>
     <strong>Tell the agent what you need</strong>
     <textarea id="goal" rows="2" placeholder="e.g. I'm moving on Friday: sell the electronics fast and donate the books"></textarea>
+    <details class="rules">
+      <summary>Your rules for the agent</summary>
+      <label>Never sell (item numbers or words, comma-separated)
+        <input id="never-sell" type="text" placeholder="e.g. pokemon, item-004"></label>
+      <label>Largest discount for buyers, %
+        <input id="max-discount" type="number" min="0" max="90" step="5" placeholder="e.g. 20"></label>
+    </details>
     <div class="actions">
       <button id="run-agent" type="button">Run agent</button>
       <button id="mic" class="ghost" type="button">Speak instead</button>
+      <button id="undo" class="ghost" type="button" hidden>Undo last agent session</button>
     </div>
+    <div id="proposal" hidden></div>
   </section>
   <div id="sources" hidden></div>
   <div id="grid"></div>
@@ -420,17 +434,60 @@ async function postForm(url, body) {
   return data;
 }
 
+// The agent proposes; the person picks what to apply; every applied session can be undone.
+const trail = (action) => log(`• ${action}`, action.includes("blocked by check") ? "warn" : "");
+
 async function callAgent(fields) {
   const body = new FormData();
   Object.entries(fields).forEach(([key, value]) => body.append(key, value));
+  body.append("never_sell", $("never-sell").value);
+  if ($("max-discount").value !== "") body.append("max_discount_pct", $("max-discount").value);
   log("The agent is working…", "muted");
   try {
     const data = await postForm(`/api/runs/${current}/agent`, body);
-    data.actions.forEach((action) => log(`• ${action}`, action.includes("blocked by check") ? "warn" : ""));
+    data.actions.forEach(trail);
     log(data.summary, "agent");
-    render(data.pack, `/runs/${current}/pack/`);
+    showProposal(data.proposal);
   } catch (error) {
     log(`Agent failed: ${error.message}`, "error");
+  }
+}
+
+function showProposal(actions) {
+  const box = $("proposal");
+  if (!actions.length) { box.hidden = true; log("The agent proposes no change.", "muted"); return; }
+  const rows = actions.map((text, index) => el("label", { className: "pick-action" }, [
+    el("input", { type: "checkbox", checked: true, value: String(index) }), el("span", { textContent: text })]));
+  const apply = el("button", { type: "button", textContent: "Apply selected" });
+  const discard = el("button", { type: "button", className: "ghost", textContent: "Discard" });
+  apply.addEventListener("click", async () => {
+    const body = new FormData();
+    body.append("selected", rows.filter((r) => r.firstChild.checked).map((r) => r.firstChild.value).join(","));
+    try {
+      const data = await postForm(`/api/runs/${current}/agent/apply`, body);
+      data.actions.forEach(trail);
+      log(`Applied ${body.get("selected").split(",").filter(Boolean).length} of ${actions.length} actions.`, "agent");
+      box.hidden = true;
+      $("undo").hidden = !data.can_undo;
+      render(data.pack, `/runs/${current}/pack/`);
+    } catch (error) {
+      log(`Apply failed: ${error.message}`, "error");
+    }
+  });
+  discard.addEventListener("click", () => { box.hidden = true; log("Proposal discarded.", "muted"); });
+  box.replaceChildren(el("strong", { textContent: "The agent proposes" }), ...rows,
+    el("div", { className: "actions" }, [apply, discard]));
+  box.hidden = false;
+}
+
+async function undoAgent() {
+  try {
+    const data = await postForm(`/api/runs/${current}/agent/undo`, new FormData());
+    log("Last agent session undone.", "agent");
+    $("undo").hidden = !data.can_undo;
+    render(data.pack, `/runs/${current}/pack/`);
+  } catch (error) {
+    log(`Undo failed: ${error.message}`, "error");
   }
 }
 
@@ -509,6 +566,7 @@ async function init() {
     e.preventDefault(); drop.classList.remove("over"); choose(e.dataTransfer.files);
   });
   $("form").addEventListener("submit", start);
+  $("undo").addEventListener("click", undoAgent);
   $("run-agent").addEventListener("click", () => $("goal").value.trim() &&
     callAgent({ goal: $("goal").value.trim() }));
   $("mic").addEventListener("click", () => (recorder ? stopMic() : startMic()).catch(showMicError));

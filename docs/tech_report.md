@@ -62,6 +62,14 @@ moving contact or payment off the marketplace, is rejected and the agent is told
 are drafts until a person approves them. Spoken goals are transcribed and shown before the
 agent acts.
 
+### 3.5b Agent management
+The agent never changes the pack directly in the app. It returns a proposal: the actions that
+passed every check, plus the trail of blocked attempts and why. The person ticks what to apply;
+each picked action is checked again against the pack and the seller's policy (never-sell items,
+maximum discount), and a snapshot taken before applying makes the session undoable. Every model
+call (Meta, Baseten, Modal) and every agent step with its tool, arguments and check result is
+traced in Pydantic Logfire.
+
 ### 3.6 Public demo safety
 A spending cap (`OMS_BUDGET_USD`) stops live work on a public deployment once reached; the
 bundled demo pack keeps working without any call.
