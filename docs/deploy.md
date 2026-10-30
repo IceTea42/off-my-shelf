@@ -4,7 +4,21 @@ Every model runs behind the Meta Model API, so the app needs no GPU: a free Hugg
 (CPU basic) hosts it. The Space uses the Gradio SDK only to run `app.py`, which starts this
 project's own web app; no Gradio interface is involved.
 
-## Hugging Face Space
+## Modal (main host)
+
+1. Once: `uv run modal token new` (opens your browser to log in to Modal).
+2. Deploy, from the repo folder, with your keys in `.env`:
+
+   ```
+   uv run modal deploy scripts/modal_app.py
+   ```
+
+   It prints the app's address (`https://<you>--off-my-shelf-web.modal.run`). Open it on the phone
+   and install it as on the Space (see [phone.md](phone.md)). The keys in `.env` go to Modal as an
+   encrypted secret; runs and the model cache live on the Modal Volume `off-my-shelf-data`.
+3. The Modal dashboard (modal.com/apps) shows each request, container time and cost.
+
+## Hugging Face Space (backup)
 
 The Space `icetea/off-my-shelf` exists (private, CPU basic). Deploy or update it from the repo:
 

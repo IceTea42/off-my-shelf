@@ -25,3 +25,12 @@ def test_space_files_are_tracked_files_plus_space_entry_points() -> None:
     assert not any(line.startswith(b".") for line in requirements.splitlines())
     assert not any(name.startswith(deploy.PRIVATE_DIRS) for name in files)
     assert b'main(["serve"])' in files["app.py"]
+
+
+def test_modal_app_defines_the_web_endpoint() -> None:
+    spec = importlib.util.spec_from_file_location("modal_app", SCRIPT.parent / "modal_app.py")
+    assert spec is not None and spec.loader is not None
+    modal_app = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modal_app)
+    assert modal_app.app.name == "off-my-shelf"
+    assert modal_app.BUDGET_USD == "10"
