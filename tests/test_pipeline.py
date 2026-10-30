@@ -307,3 +307,32 @@ async def test_video_item_is_listed_once_from_its_best_frame(tmp_path: Path) -> 
         if c["response_format"]["json_schema"]["name"] == "SceneInventory"
     )
     assert "Items listed from earlier frames: lamp." in str(later_frame["messages"])
+
+
+async def test_cards_are_published_before_the_completed_shot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pipeline, "HIDDEN_MIN_SHARE", 0.0)
+    settings = _settings(tmp_path)
+    photos = tmp_path / "photos"
+    _photo(photos)
+    _photo(photos, "second.png")  # two photos are scanned side by side
+    client = FakeMetaClient(["plate"])
+    services = _services(client, settings)
+    run = Pipeline(services, settings)
+    seen_while_completing: list[list[str]] = []
+    complete = services.photographer.complete  # type: ignore[union-attr]
+
+    async def watching(*args: object) -> object:
+        seen_while_completing.append([item.product_shots[0] for item in run.partial.values()])
+        return await complete(*args)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(services.photographer, "complete", watching)
+    pack = await run.run([photos], tmp_path / "out")
+
+    assert [item.item_id for item in pack.items] == ["item-001", "item-002"]
+    # Each card was listed with its real-pixel shot while its completion was still running.
+    assert seen_while_completing[0] == ["shots/item-001-plate.jpg"]
+    assert "shots/item-002-plate.jpg" in seen_while_completing[1]
+    assert list(run.partial.values()) == pack.items
+    assert run.items_done == run.items_total == 2

@@ -65,6 +65,9 @@
   .reply.ok { border-color:var(--sell); }
   .buyer { display:grid; gap:6px; }
   .langs { display:flex; gap:6px; }
+  #grid.running .actions, #grid.running .langs, #grid.running .buyer { display:none; }
+  #grid.running .card { animation: arrive .4s ease-out; }
+  @keyframes arrive { from { opacity:0; transform:translateY(8px); } }
   .ad video { width:100%; max-height:480px; background:#000; border-radius:10px; display:block; }
   .card .actions { flex-wrap:wrap; }
   .chip { min-height:32px; padding:4px 10px; font-size:12px; background:transparent; color:var(--muted);
@@ -318,25 +321,34 @@ function show(run) {
   render(run.pack, run.base_url);
 }
 
-function render(pack, base) {
+// While a run is going, cards show as soon as their listing is ready (actions come at the end).
+function render(pack, base, running = false) {
   const items = pack.items;
   const selling = items.filter((i) => i.analysis.triage.decision === "sell");
   const value = selling.reduce((sum, i) => sum + i.analysis.price.suggested, 0);
   $("summary").textContent = `${items.length} items · ${selling.length} to sell, about ${Math.round(value)} €`;
   $("zip").href = `/api/runs/${current}/zip`;
+  $("zip").hidden = running;
   $("bar").hidden = false;
+  $("grid").classList.toggle("running", running);
   const crops = Object.fromEntries(items.map((i) => [i.item_id, base + i.detection.crop_path]));
   $("grid").replaceChildren(...(pack.bundles || []).map((b) => bundleCard(b, crops)),
     ...items.map((item) => card(item, base)));
-  if (!items.length) log("No items found: try a closer photo.", "warn");
+  if (!items.length && !running) log("No items found: try a closer photo.", "warn");
 }
 
 async function follow(runId) {
-  for (let seen = 0; ;) {
+  current = runId;
+  for (let seen = 0, shown = ""; ;) {
     const response = await fetch(`/api/runs/${runId}?since=${seen}`);
     const run = await response.json();
     run.messages.forEach((m) => log(m, m.startsWith("warning:") ? "warn" : "muted"));
     seen = run.message_count;
+    const partial = JSON.stringify((run.items || []).map((i) => [i.item_id, i.product_shots]));
+    if (run.status === "running" && partial !== shown && run.items.length) {
+      shown = partial;
+      render({ items: run.items }, run.base_url, true);
+    }
     if (run.status === "done") { document.title = "✓ Off My Shelf"; return show(run); }
     if (run.status === "error") { document.title = "⚠ Off My Shelf"; return log(run.error, "error"); }
     document.title = run.items_total

@@ -16,7 +16,15 @@ from openai import OpenAIError
 
 from off_my_shelf.cache import DiskCache, OfflineCacheMissError
 from off_my_shelf.config import Settings
-from off_my_shelf.imaging import PixelBox, crop, encode, mask_image, pixel_lock, studio_canvas
+from off_my_shelf.imaging import (
+    PixelBox,
+    StudioCanvas,
+    crop,
+    encode,
+    mask_image,
+    pixel_lock,
+    studio_canvas,
+)
 from off_my_shelf.media import Still, collect_inputs, stills
 from off_my_shelf.meta_client import make_client, make_open_weights_client
 from off_my_shelf.mocks import save_pack
@@ -151,6 +159,8 @@ class Pipeline:
         self.items_total = 0
         self.items_done = 0
         self.warnings: list[str] = []
+        self.partial: dict[str, Item] = {}  # items listed so far, for live display
+        self._next_number = 0
 
     def _too_small(self, segment: Segment) -> bool:
         box = segment.box
@@ -174,48 +184,62 @@ class Pipeline:
         self.warnings = []
         (out_dir / "media").mkdir(parents=True, exist_ok=True)
 
-        media_paths: list[str] = []
-        found: list[_Found] = []
-        for file in files:
-            self.progress(f"reading {file.name}")
-            seen: list[str] = []  # phrases from earlier frames of this video
-            for still in stills(file, self.settings.max_image_side_px):
-                min_side = self.settings.min_still_side_px
-                if min(still.image.size) < min_side:
-                    width, height = still.image.size
-                    self._warn(
-                        f"{file.name}: {width}x{height} px is too small (under {min_side} px"
-                        " on a side); use a higher-resolution photo or video"
-                    )
-                    continue
-                media_path = f"media/{still.stem}.jpg"
-                (out_dir / media_path).write_bytes(encode(still.image, "JPEG"))
-                media_paths.append(media_path)
-                hits = await self._detect(still, media_path, seen)
-                found.extend(hits)
-                seen.extend(h.phrase for h in hits if h.phrase not in seen)
-
+        self.partial = {}
+        self._next_number = 0
+        per_file = await asyncio.gather(*(self._file(f, out_dir, language) for f in files))
+        media_paths = [path for media, _ in per_file for path in media]
         if not media_paths:
             raise ValueError("every photo or frame was too small: " + "; ".join(self.warnings))
-        detections = _merge_duplicates(_best_sightings(found))
-        self.items_total = len(detections)
-        self.progress(f"writing listings for {len(detections)} items")
-        items = await asyncio.gather(
-            *(
-                self._item(f"item-{n:03d}", f, out_dir, language)
-                for n, f in enumerate(detections, start=1)
-            )
-        )
+        items = sorted((item for _, found in per_file for item in found), key=lambda i: i.item_id)
         pack = ListingPack(
             run_id=f"run-{datetime.now(UTC):%Y%m%d-%H%M%S}",
             created_at=datetime.now(UTC),
             media=media_paths,
-            items=_drop_video_repeats(list(items)),
+            items=_drop_video_repeats(items),
             warnings=self.warnings,
         )
         save_pack(out_dir, pack)
         self.progress(f"done: {len(pack.items)} items")
         return pack
+
+    async def _file(
+        self, file: Path, out_dir: Path, language: Language
+    ) -> tuple[list[str], list[Item]]:
+        """One photo or video: scan its stills in order, then list its items in parallel.
+
+        Files run side by side, and a file's listings start as soon as its own scan ends.
+        """
+        self.progress(f"reading {file.name}")
+        media: list[str] = []
+        found: list[_Found] = []
+        seen: list[str] = []  # phrases from earlier frames of this video
+        for still in await asyncio.to_thread(stills, file, self.settings.max_image_side_px):
+            min_side = self.settings.min_still_side_px
+            if min(still.image.size) < min_side:
+                width, height = still.image.size
+                self._warn(
+                    f"{file.name}: {width}x{height} px is too small (under {min_side} px"
+                    " on a side); use a higher-resolution photo or video"
+                )
+                continue
+            media_path = f"media/{still.stem}.jpg"
+            (out_dir / media_path).write_bytes(encode(still.image, "JPEG"))
+            media.append(media_path)
+            hits = await self._detect(still, media_path, seen)
+            found.extend(hits)
+            seen.extend(h.phrase for h in hits if h.phrase not in seen)
+        detections = _merge_duplicates(_best_sightings(found))
+        self.items_total += len(detections)
+        if detections:
+            self.progress(f"{file.name}: writing listings for {len(detections)} items")
+        items = await asyncio.gather(
+            *(self._item(self._new_item_id(), f, out_dir, language) for f in detections)
+        )
+        return media, list(items)
+
+    def _new_item_id(self) -> str:
+        self._next_number += 1
+        return f"item-{self._next_number:03d}"
 
     async def _detect(self, still: Still, media_path: str, seen: Sequence[str]) -> list[_Found]:
         inventory = await self.services.spark.inventory(still.image, seen)
@@ -262,9 +286,9 @@ class Pipeline:
 
         async with self._limit:
             analysis = await self.services.spark.analyze(item_crop, language)
-        shots, shot_calls = await self._product_shot(stem, found, analysis.value, out_dir)
-        self.items_done += 1
-        return Item(
+        canvas = studio_canvas(image, found.segment.mask, box)
+        studio = _save(out_dir, f"shots/{stem}.jpg", encode(canvas.real, "JPEG", quality=92))
+        item = Item(
             item_id=item_id,
             detection=Detection(
                 source=SourceRef(
@@ -278,25 +302,34 @@ class Pipeline:
                 mask_path=mask_path,
             ),
             analysis=analysis.value,
-            product_shots=shots,
-            calls=[*found.calls, analysis.call, *shot_calls],
+            product_shots=[studio],
+            calls=[*found.calls, analysis.call],
         )
+        self.partial[item_id] = item  # the card can show now; a completed shot may follow
+        completed, shot_calls = await self._completed_shot(stem, canvas, analysis.value, out_dir)
+        item = item.model_copy(
+            update={
+                "product_shots": [*completed, studio],
+                "calls": [*item.calls, *shot_calls],
+            }
+        )
+        self.partial[item_id] = item
+        self.items_done += 1
+        return item
 
-    async def _product_shot(
-        self, stem: str, found: _Found, analysis: ItemAnalysis, out_dir: Path
+    async def _completed_shot(
+        self, stem: str, canvas: StudioCanvas, analysis: ItemAnalysis, out_dir: Path
     ) -> tuple[list[str], list[ModelCall]]:
-        """Shots built from the photo's real pixels; hidden parts AI-completed when trusted.
+        """The item with its hidden parts AI-completed, when that can be trusted.
 
-        Always: a studio shot of the real item (no generation). When part of the item is
-        hidden: Muse Image fills only the hidden areas, every visible pixel is restored from the
-        photo, and the result is kept only if the model did not move or redraw the item (drift)
-        and Muse Spark sees no extra object or invented damage. One corrected retry.
+        The studio shot of the real pixels always exists. When part of the item is hidden,
+        Muse Image fills only the hidden areas, every visible pixel is restored from the photo,
+        and the result is kept only if the model did not move or redraw the item (drift) and
+        Muse Spark sees no extra object or invented damage. One corrected retry.
         """
-        canvas = studio_canvas(found.still.image, found.segment.mask, _crop_box(found))
-        studio = _save(out_dir, f"shots/{stem}.jpg", encode(canvas.real, "JPEG", quality=92))
         photographer = self.services.photographer
         if photographer is None or canvas.hidden_share <= HIDDEN_MIN_SHARE:
-            return [studio], []
+            return [], []
         _save(out_dir, f"inputs/{stem}-to-fill.png", encode(canvas.to_fill, "PNG"))
         name, defects = analysis.identification.name, analysis.condition.defects
         calls: list[ModelCall] = []
@@ -318,7 +351,7 @@ class Pipeline:
                 if check.value.passed:
                     self.progress(f"{stem}: hidden parts completed (drift {drift:.3f})")
                     jpeg = encode(locked, "JPEG", quality=92)
-                    return [_save(out_dir, f"shots/{stem}-completed.jpg", jpeg), studio], calls
+                    return [_save(out_dir, f"shots/{stem}-completed.jpg", jpeg)], calls
                 rejected = check.value.reason
         except (
             OpenAIError,
@@ -328,7 +361,7 @@ class Pipeline:
         ) as error:
             rejected = type(error).__name__
         self.progress(f"{stem}: real-pixel shot only (completion rejected: {rejected})")
-        return [studio], calls
+        return [], calls
 
 
 def _save(out_dir: Path, rel: str, data: bytes) -> str:

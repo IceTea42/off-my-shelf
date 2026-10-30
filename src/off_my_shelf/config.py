@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     # Muse Spark reasoning depth: minimal | low | medium | high | xhigh ("none" is rejected)
     reasoning_effort: str | None = "low"
     request_timeout_s: float = Field(default=120.0, gt=0)
-    max_concurrency: int = Field(default=4, ge=1)
+    max_concurrency: int = Field(default=8, ge=1)
 
 
 @lru_cache(maxsize=1)

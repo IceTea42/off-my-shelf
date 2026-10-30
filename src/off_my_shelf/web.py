@@ -249,6 +249,7 @@ def _run_routes(app: FastAPI, state: _State) -> None:
         pack = None
         if run.status is RunStatus.DONE:
             pack = load_pack(state.pack_dir(run_id)).model_dump(mode="json")
+        partial = run.pipeline.partial if run.pipeline and run.status is RunStatus.RUNNING else {}
         return {
             "run_id": run_id,
             "status": run.status.value,
@@ -258,6 +259,7 @@ def _run_routes(app: FastAPI, state: _State) -> None:
             "items_done": run.pipeline.items_done if run.pipeline else 0,
             "items_total": run.pipeline.items_total if run.pipeline else 0,
             "pack": pack,
+            "items": [partial[key].model_dump(mode="json") for key in sorted(partial)],
             "base_url": f"/runs/{run_id}/pack/",
         }
 
