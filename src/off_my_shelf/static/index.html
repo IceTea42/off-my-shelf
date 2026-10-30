@@ -65,6 +65,13 @@
   .reply.ok { border-color:var(--sell); }
   .buyer { display:grid; gap:6px; }
   .langs { display:flex; gap:6px; }
+  #sources { display:flex; gap:12px; overflow-x:auto; margin:0 0 16px; }
+  .source { position:relative; flex:0 0 auto; max-width:100%; aspect-ratio:auto; background:none; }
+  .source img { display:block; max-height:360px; max-width:100%; width:auto; height:auto;
+                border-radius:12px; }
+  .source .box { position:absolute; border:2px solid #fff; border-radius:6px;
+                 box-shadow:0 0 0 1px rgba(0,0,0,.4); color:#fff; font:700 13px/1 system-ui;
+                 text-decoration:none; padding:2px 4px; text-shadow:0 1px 2px #000; }
   #grid.running .actions, #grid.running .langs, #grid.running .buyer { display:none; }
   #grid.running .card { animation: arrive .4s ease-out; }
   @keyframes arrive { from { opacity:0; transform:translateY(8px); } }
@@ -126,6 +133,7 @@
       <button id="mic" class="ghost" type="button">Speak instead</button>
     </div>
   </section>
+  <div id="sources" hidden></div>
   <div id="grid"></div>
 </div>
 
@@ -292,7 +300,7 @@ function card(item, base) {
   const draft = el("button", { type: "button", className: "ghost", textContent: "Draft a reply" });
   draft.addEventListener("click", () => ask.value.trim() &&
     callAgent({ buyer_item_id: item.item_id, buyer_message: ask.value.trim() }));
-  return el("article", { className: "card" }, [
+  return el("article", { className: "card", id: item.item_id }, [
     el("div", { className: "photos" + (photos.length === 1 ? " single" : "") }, photos),
     el("div", { className: "body" }, [
       el("div", { className: "row" }, [
@@ -321,6 +329,25 @@ function show(run) {
   render(run.pack, run.base_url);
 }
 
+// The input photos (or video frames) with a numbered box per item: input -> output at a glance.
+function renderSources(pack, base) {
+  const media = pack.media || [...new Set(pack.items.map((i) => i.detection.source.media))];
+  $("sources").hidden = media.length === 0;
+  $("sources").replaceChildren(...media.map((path) => {
+    const boxes = pack.items.filter((i) => i.detection.source.media === path).map((item) => {
+      const b = item.detection.bbox;
+      const box = el("a", { className: "box", href: `#${item.item_id}`,
+        textContent: String(Number(item.item_id.split("-")[1])),
+        title: item.analysis.listing.title });
+      Object.assign(box.style, { left: `${b.x0 * 100}%`, top: `${b.y0 * 100}%`,
+        width: `${(b.x1 - b.x0) * 100}%`, height: `${(b.y1 - b.y0) * 100}%` });
+      return box;
+    });
+    return el("figure", { className: "source" }, [
+      el("img", { src: base + path, alt: "Your photo", loading: "lazy" }), ...boxes]);
+  }));
+}
+
 // While a run is going, cards show as soon as their listing is ready (actions come at the end).
 function render(pack, base, running = false) {
   const items = pack.items;
@@ -334,6 +361,7 @@ function render(pack, base, running = false) {
   const crops = Object.fromEntries(items.map((i) => [i.item_id, base + i.detection.crop_path]));
   $("grid").replaceChildren(...(pack.bundles || []).map((b) => bundleCard(b, crops)),
     ...items.map((item) => card(item, base)));
+  renderSources(pack, base);
   if (!items.length && !running) log("No items found: try a closer photo.", "warn");
 }
 
