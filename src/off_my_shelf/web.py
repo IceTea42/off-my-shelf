@@ -17,7 +17,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAIError
@@ -36,11 +36,21 @@ from off_my_shelf.demo import demo_pack_dir
 from off_my_shelf.export import export_pack
 from off_my_shelf.media import IMAGE_SUFFIXES, VIDEO_SUFFIXES
 from off_my_shelf.meta_client import describe_error, make_client
-from off_my_shelf.mocks import load_pack, save_pack
+from off_my_shelf.mocks import PACK_FILENAME, load_pack, save_pack
 from off_my_shelf.pipeline import Pipeline, build_services
 from off_my_shelf.report import live_cost
 from off_my_shelf.schema import Item, Language, ListingPack
 from off_my_shelf.tracing import trace_app
+from off_my_shelf.trials import (
+    RUNS_PER_HOUR,
+    VISITOR_ID,
+    RateLimiter,
+    Trial,
+    load_trial,
+    prune,
+    save_trial,
+    visitor_trials,
+)
 from off_my_shelf.video_ad import make_item_ad
 from off_my_shelf.voice import AudioFormatError, Transcriber, to_api_wav, wav_seconds
 
@@ -49,6 +59,7 @@ DEMO_RUN_ID = "demo"
 MAX_UPLOAD_FILES = 20
 MIN_VOICE_SECONDS = 0.5
 MEDIA_SUFFIXES = IMAGE_SUFFIXES | VIDEO_SUFFIXES
+VISITOR_COOKIE = "oms_visitor"
 OFFLINE_DETAIL = "This needs META_API_KEY in .env (the app is in offline mode)."
 BUDGET_DETAIL = "This demo's API budget is used up: try the demo pack, or run it locally."
 logger = logging.getLogger(__name__)
@@ -99,6 +110,14 @@ def _agent_dir(pack_dir: Path) -> Path:
     return pack_dir.parent / "agent"
 
 
+def visitor_of(request: Request) -> str:
+    """The anonymous id the page keeps in this browser (cookie), or one for this address."""
+    cookie = request.cookies.get(VISITOR_COOKIE, "")
+    if VISITOR_ID.match(cookie):
+        return cookie
+    return f"ip-{request.client.host if request.client else 'unknown'}"
+
+
 def _voice_keeper(settings: Settings, suffix: str) -> Callable[[str, bytes], None]:
     """Debug only: a saver for one voice note's files, or a no-op when debugging is off."""
     if not settings.debug_voice:
@@ -143,6 +162,7 @@ class _State:
     runs: dict[str, Run] = field(default_factory=dict)
     tasks: set[asyncio.Task[None]] = field(default_factory=set)
     spent_usd: float = 0.0
+    limiter: RateLimiter = field(default_factory=RateLimiter)  # per client address
 
     @property
     def offline(self) -> bool:
@@ -159,13 +179,23 @@ class _State:
     def pack_dir(self, run_id: str) -> Path:
         return self.settings.runs_dir / run_id / "pack"
 
-    def start_run(self, files: list[UploadFile], language: Language, product_shots: bool) -> str:
+    def start_run(
+        self, files: list[UploadFile], language: Language, product_shots: bool, request: Request
+    ) -> str:
         """Save the uploads and run the pipeline in the background; returns the run id."""
         if not files or len(files) > MAX_UPLOAD_FILES:
             raise HTTPException(400, f"send 1 to {MAX_UPLOAD_FILES} photos or videos")
         if not self.offline:  # offline runs replay the cache for free
             self.require_live()
+            client = request.client.host if request.client else "unknown"
+            if not self.limiter.allow(client):
+                raise HTTPException(429, f"Up to {RUNS_PER_HOUR} runs an hour: try again later.")
         run_id = uuid.uuid4().hex[:12]
+        prune(self.settings.runs_dir)
+        save_trial(
+            self.settings.runs_dir,
+            Trial(run_id=run_id, visitor=visitor_of(request), created_at=datetime.now(UTC)),
+        )
         upload_dir = self.settings.runs_dir / run_id / "uploads"
         _save_uploads(files, upload_dir)
         run = self.runs[run_id] = Run(run_id)
@@ -196,15 +226,22 @@ class _State:
             raise HTTPException(404, "unknown item")
         return target, pack, found
 
+    def lookup(self, run_id: str) -> Run | None:
+        """A run in memory, or a finished one found on disk (after a restart)."""
+        on_disk = (self.pack_dir(run_id) / PACK_FILENAME).is_file()
+        if run_id not in self.runs and on_disk and load_trial(self.settings.runs_dir, run_id):
+            self.runs[run_id] = Run(run_id, RunStatus.DONE, ["run reopened"])
+        return self.runs.get(run_id)
+
     def finished(self, run_id: str) -> Path:
-        run = self.runs.get(run_id)
+        run = self.lookup(run_id)
         if run is None or run.status is not RunStatus.DONE:
             raise HTTPException(404, "pack not ready")
         return self.pack_dir(run_id)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
-    state = _State(settings or get_settings())
+    state = _State(settings or get_settings(), limiter=RateLimiter())
     state.settings.runs_dir.mkdir(parents=True, exist_ok=True)
     app = FastAPI(title="Off My Shelf")
     trace_app(app)
@@ -215,6 +252,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     _voice_routes(app, state)
     _item_routes(app, state)
     _agent_routes(app, state)
+    _trial_routes(app, state)
     _proposal_routes(app, state)
     return app
 
@@ -259,16 +297,20 @@ def _page_routes(app: FastAPI, state: _State) -> None:
 def _run_routes(app: FastAPI, state: _State) -> None:
     @app.post("/api/runs", status_code=202)
     async def start_run(
+        request: Request,
         files: Annotated[list[UploadFile], File()],
         language: Annotated[Language, Form()] = Language.EN,
         product_shots: Annotated[bool, Form()] = True,
     ) -> dict[str, str]:
-        return {"run_id": state.start_run(files, language, product_shots)}
+        return {"run_id": state.start_run(files, language, product_shots, request)}
 
     @app.post("/share")
-    async def share_target(files: Annotated[list[UploadFile], File()]) -> RedirectResponse:
+    async def share_target(
+        request: Request, files: Annotated[list[UploadFile], File()]
+    ) -> RedirectResponse:
         """Android share sheet ("Share" photos to the installed app): start a run, show it."""
-        run_id = state.start_run(files, state.settings.default_language, product_shots=True)
+        language = state.settings.default_language
+        run_id = state.start_run(files, language, product_shots=True, request=request)
         return RedirectResponse(f"/?run={run_id}", status_code=303)
 
     @app.post("/api/demo")
@@ -284,7 +326,7 @@ def _run_routes(app: FastAPI, state: _State) -> None:
     @app.get("/api/runs/{run_id}")
     async def run_status(run_id: str, since: int = 0) -> dict[str, Any]:
         """Run state; ``messages`` holds only those after the first ``since``."""
-        run = state.runs.get(run_id)
+        run = state.lookup(run_id)
         if run is None:
             raise HTTPException(404, "unknown run")
         pack = None
@@ -436,6 +478,22 @@ def _proposal_routes(app: FastAPI, state: _State) -> None:
         snapshots[-1].unlink()
         await asyncio.to_thread(export_pack, target)
         return {"pack": pack.model_dump(mode="json"), "can_undo": len(snapshots) > 1}
+
+
+def _trial_routes(app: FastAPI, state: _State) -> None:
+    @app.get("/api/trials")
+    async def my_trials(request: Request) -> list[dict[str, object]]:
+        """This browser's own runs, newest first (hidden ones left out)."""
+        return visitor_trials(state.settings.runs_dir, visitor_of(request))
+
+    @app.post("/api/trials/{run_id}/hide")
+    async def hide_trial(run_id: str, request: Request) -> dict[str, bool]:
+        """Hide a run from its owner's list; it stays in the rolling buffer until it expires."""
+        trial = load_trial(state.settings.runs_dir, run_id)
+        if trial is None or trial.visitor != visitor_of(request):
+            raise HTTPException(404, "unknown run")
+        save_trial(state.settings.runs_dir, trial.model_copy(update={"hidden": True}))
+        return {"hidden": True}
 
 
 def _agent_routes(app: FastAPI, state: _State) -> None:

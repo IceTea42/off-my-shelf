@@ -65,6 +65,15 @@
   .reply.ok { border-color:var(--sell); }
   .buyer { display:grid; gap:6px; }
   .langs { display:flex; gap:6px; }
+  .notice { flex:1 1 100%; margin:0; font-size:12px; color:var(--muted); }
+  #trials { margin:12px 0; background:var(--card); border:1px solid var(--line); border-radius:14px;
+            padding:10px 16px; }
+  #trials summary { cursor:pointer; font-weight:600; }
+  .trial { display:flex; align-items:center; gap:10px; padding:6px 0; border-top:1px solid var(--line);
+           font-size:14px; }
+  .trial img, .trial .thumb { width:48px; height:48px; object-fit:cover; border-radius:8px; background:#eee; }
+  .trial span { flex:1; }
+  .trial button { min-height:36px; padding:4px 10px; }
   .post { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
   .post::before { content:"Post on"; color:var(--muted); font-size:12px; }
   .post:empty { display:none; }
@@ -128,7 +137,15 @@
     <label class="muted"><input id="shots" type="checkbox" checked> AI-complete hidden parts</label>
     <button id="start" type="submit" disabled>Create listings</button>
     <button id="demo" class="ghost" type="button">Try the demo</button>
+    <p class="notice">Your photos and listings are kept up to 30 days so you can come back to them
+      (and to improve the app). Hide them from your list anytime; ask for deletion on
+      <a href="https://github.com/IceTea42/off-my-shelf/issues" target="_blank" rel="noopener">GitHub</a>.
+      Only list things you own.</p>
   </form>
+  <details id="trials" hidden>
+    <summary>My trials</summary>
+    <div id="trial-list"></div>
+  </details>
 
   <div id="log" role="log" aria-live="polite" hidden></div>
   <div class="bar" id="bar" hidden>
@@ -420,7 +437,11 @@ async function follow(runId) {
       shown = partial;
       render({ items: run.items }, run.base_url, true);
     }
-    if (run.status === "done") { document.title = "✓ Off My Shelf"; return show(run); }
+    if (run.status === "done") {
+      document.title = "✓ Off My Shelf";
+      loadTrials().catch(() => {});
+      return show(run);
+    }
     if (run.status === "error") { document.title = "⚠ Off My Shelf"; return log(run.error, "error"); }
     document.title = run.items_total
       ? `(${run.items_done}/${run.items_total}) Off My Shelf` : "… Off My Shelf";
@@ -574,7 +595,35 @@ function showMicError(error) {
   log(`Voice failed: ${error.message}`, "error");
 }
 
+// An anonymous id for this browser, so it can find its own runs again (cookie, one year).
+function ensureVisitor() {
+  if (/(^|; )oms_visitor=/.test(document.cookie)) return;
+  const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2);
+  document.cookie = `oms_visitor=${id}; max-age=31536000; path=/; samesite=lax`;
+}
+
+async function loadTrials() {
+  const rows = await (await fetch("/api/trials")).json();
+  $("trials").hidden = rows.length === 0;
+  $("trial-list").replaceChildren(...rows.map((row) => {
+    const open = el("button", { type: "button", className: "ghost", textContent: "Open" });
+    open.addEventListener("click", () => follow(row.run_id));
+    const hide = el("button", { type: "button", className: "ghost", textContent: "Hide" });
+    hide.addEventListener("click", async () => {
+      await postForm(`/api/trials/${row.run_id}/hide`, new FormData());
+      loadTrials();
+    });
+    const when = new Date(row.created_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+    return el("div", { className: "trial" }, [
+      row.thumbnail ? el("img", { src: `/runs/${row.run_id}/pack/${row.thumbnail}`, alt: "", loading: "lazy" })
+        : el("span", { className: "thumb" }),
+      el("span", { textContent: `${when} · ${row.items ?? "…"} items` }), open, hide]);
+  }));
+}
+
 async function init() {
+  ensureVisitor();
+  loadTrials().catch(() => {});
   const config = await (await fetch("/api/config")).json();
   $("language").replaceChildren(...config.languages.map((code) =>
     el("option", { value: code, textContent: LANG_NAMES[code] || code,
