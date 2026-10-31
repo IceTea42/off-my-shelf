@@ -50,11 +50,13 @@ image = (
             "TORCH_CUDA_ARCH_LIST": "8.0;8.6;8.9;9.0",
             "FORCE_CUDA": "1",
             "LIDRA_SKIP_INIT": "true",
-            "PIP_EXTRA_INDEX_URL": "https://pypi.ngc.nvidia.com https://download.pytorch.org/whl/cu121",
+            # PyTorch CUDA 12.1 wheels only: NVIDIA's NGC index is unreachable from Modal
+            "PIP_EXTRA_INDEX_URL": "https://download.pytorch.org/whl/cu121",
+            "PIP_CONFIG_FILE": "/dev/null",  # nvidia-pyindex would add the NGC index back
         }
     )
     .run_commands(f"git clone {REPO} /sam3d && git -C /sam3d checkout {COMMIT}")
-    .run_commands("cd /sam3d && pip install -e '.[dev]'")
+    .run_commands("cd /sam3d && pip install -e .")
     .run_commands(f"pip install {FLASH_ATTN}", "cd /sam3d && pip install -e '.[p3d]'", gpu=GPU)
     .run_commands(
         "cd /sam3d && PIP_FIND_LINKS=https://nvidia-kaolin.s3.us-east-2.amazonaws.com/"
