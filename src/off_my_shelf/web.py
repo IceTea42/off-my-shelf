@@ -244,7 +244,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     state = _State(settings or get_settings(), limiter=RateLimiter())
     state.settings.runs_dir.mkdir(parents=True, exist_ok=True)
     app = FastAPI(title="Off My Shelf")
-    trace_app(app)
+    trace_app(app, state.settings.logfire_token)
     app.mount("/runs", StaticFiles(directory=state.settings.runs_dir), name="runs")
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
     _page_routes(app, state)

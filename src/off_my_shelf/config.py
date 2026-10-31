@@ -44,6 +44,11 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MODAL_SPARK_OPEN_KEY", "OMS_MODAL_SPARK_OPEN_KEY"),
     )
 
+    # Traces in Pydantic Logfire (off when unset; read from .env like the other keys)
+    logfire_token: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("LOGFIRE_TOKEN", "OMS_LOGFIRE_TOKEN")
+    )
+
     # Listings
     default_language: Language = Language.EN
 

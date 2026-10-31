@@ -6,9 +6,10 @@ and microphone. Browsers only allow the camera, microphone and install on `https
 
 ## On the public URL
 
-Open <https://icetea-off-my-shelf.hf.space> in Chrome (the app itself, not the Hugging Face
-page that frames it, so the camera, microphone and install work), then **⋮ → Add to Home screen
-→ Install**. While the Space is private, sign in to huggingface.co in the same browser first.
+Open the Modal address (`https://<you>--off-my-shelf-web.modal.run`, see [deploy.md](deploy.md))
+or the backup <https://icetea-off-my-shelf.hf.space> in Chrome (the app itself, not the Hugging
+Face page that frames it, so the camera, microphone and install work), then
+**⋮ → Add to Home screen → Install**.
 Photos shared from the gallery (**Share → Off My Shelf**) start a run directly.
 
 ## On your own computer, through a USB cable

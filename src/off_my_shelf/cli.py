@@ -155,7 +155,7 @@ def main(argv: list[str] | None = None) -> None:
     serve.set_defaults(handler=_serve)
 
     args = parser.parse_args(argv)
-    setup_tracing()
+    setup_tracing(get_settings().logfire_token)
     args.handler(args)
 
 

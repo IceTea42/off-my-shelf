@@ -46,6 +46,13 @@ def test_space_secrets_carry_partner_keys_when_set() -> None:
     deploy = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(deploy)
     settings = Settings(  # type: ignore[call-arg]
-        _env_file=None, meta_api_key=SecretStr("m"), baseten_api_key=SecretStr("b")
+        _env_file=None,
+        meta_api_key=SecretStr("m"),
+        baseten_api_key=SecretStr("b"),
+        logfire_token=SecretStr("l"),
     )
-    assert deploy.space_secrets(settings) == {"META_API_KEY": "m", "BASETEN_API_KEY": "b"}
+    assert deploy.space_secrets(settings) == {
+        "META_API_KEY": "m",
+        "BASETEN_API_KEY": "b",
+        "LOGFIRE_TOKEN": "l",
+    }

@@ -1,4 +1,4 @@
-"""Publish the web app to a free Hugging Face Space (Gradio SDK, CPU basic).
+"""Publish the web app to a free Hugging Face Space (Gradio SDK, free ZeroGPU).
 
 A Gradio Space only runs ``app.py``; ours starts this project's own FastAPI app on the Space's
 port, so no Gradio UI is involved. Only files tracked by git are uploaded (never ``.env``,
@@ -116,6 +116,8 @@ def space_secrets(settings: Settings) -> dict[str, str]:
     secrets = {"META_API_KEY": settings.meta_api_key.get_secret_value()}
     if settings.baseten_api_key is not None:
         secrets["BASETEN_API_KEY"] = settings.baseten_api_key.get_secret_value()
+    if settings.logfire_token is not None:
+        secrets["LOGFIRE_TOKEN"] = settings.logfire_token.get_secret_value()
     if settings.modal_spark_open_url and settings.modal_spark_open_key is not None:
         secrets["MODAL_SPARK_OPEN_URL"] = settings.modal_spark_open_url
         secrets["MODAL_SPARK_OPEN_KEY"] = settings.modal_spark_open_key.get_secret_value()
