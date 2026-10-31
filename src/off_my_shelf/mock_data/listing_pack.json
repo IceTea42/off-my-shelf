@@ -48,7 +48,7 @@
       },
       "pricing_mode": "sell_fast",
       "product_shots": ["shots/item-001.png"],
-      "voice_note": "Elle marche très bien, juste quelques rayures en dessous.",
+      "owner_note": "Elle marche très bien, juste quelques rayures en dessous.",
       "buyer_replies": [
         {
           "buyer_message": "Bonjour, vous la laisseriez à 8 € ?",
@@ -234,7 +234,7 @@
           "reason": "Encore utilisables mais valeur trop faible pour une vente."
         }
       },
-      "voice_note": "Elles sont encore étanches, mon fils les a juste dépassées."
+      "owner_note": "Elles sont encore étanches, mon fils les a juste dépassées."
     },
     {
       "item_id": "item-005",

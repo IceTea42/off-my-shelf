@@ -299,6 +299,12 @@ def test_fallback_phrases() -> None:
     assert fallback_phrases(item) == ["black crossbody bag", "handbag", "bag"]
     item = SceneItem(phrase="mug", label="Mug", short_name="mug")
     assert fallback_phrases(item) == ["mug"]
+    item = SceneItem(phrase="yogurt maker with glass jars on left", label="Y", short_name="maker")
+    assert fallback_phrases(item) == [
+        "yogurt maker with glass jars on left",
+        "yogurt maker",
+        "maker",
+    ]
 
 
 async def test_missed_phrase_is_retried_with_simpler_names(tmp_path: Path) -> None:
@@ -382,3 +388,15 @@ async def test_cards_are_published_before_the_completed_shot(
     assert "shots/item-002-plate.jpg" in seen_while_completing[1]
     assert list(run.partial.values()) == pack.items
     assert run.items_done == run.items_total == 2
+
+
+async def test_unidentified_items_are_dropped_with_a_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pipeline, "MIN_CONFIDENCE", 1.01)  # nothing is sure enough
+    settings = _settings(tmp_path)
+    client = FakeMetaClient(phrases=["mug"])
+    pack = await Pipeline(_services(client, settings), settings).run(
+        [_photo(tmp_path / "in")], tmp_path / "out"
+    )
+    assert pack.items == [] and any("could not tell what it is" in w for w in pack.warnings)

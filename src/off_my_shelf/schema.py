@@ -13,7 +13,15 @@ from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import Annotated, Final, Literal, Self
 
-from pydantic import AfterValidator, AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AfterValidator,
+    AliasChoices,
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 SCHEMA_VERSION: Final = "1.0"
 
@@ -70,6 +78,8 @@ class TriageDecision(StrEnum):
     SELL = "sell"
     DONATE = "donate"
     RECYCLE = "recycle"
+    BIN = "bin"  # worn out or dirty beyond use: general waste
+    KEEP = "keep"  # not part of the clear-out: furniture the items stand on, half-seen things
 
 
 class PricingMode(StrEnum):
@@ -204,9 +214,15 @@ class Item(_Model):
     analysis: ItemAnalysis
     pricing_mode: PricingMode | None = None
     product_shots: list[RelPath] = []
-    voice_note: Annotated[str, Field(max_length=2000)] | None = None
+    owner_note: Annotated[str, Field(max_length=2000)] | None = Field(
+        default=None,
+        description="What the owner told the AI about the item (typed or spoken)",
+        validation_alias=AliasChoices("owner_note", "voice_note"),  # packs saved before B52
+    )
     buyer_replies: list[BuyerReply] = []
-    ad_video: RelPath | None = Field(default=None, description="10 s vertical MP4 ad")
+    ad_video: RelPath | None = Field(
+        default=None, description="5 s vertical MP4 shelf-to-studio clip"
+    )
     turntable_video: RelPath | None = Field(
         default=None, description="3 s MP4 of the item's 3D model making one full turn"
     )

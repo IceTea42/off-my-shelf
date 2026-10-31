@@ -89,9 +89,10 @@ video ad, to a marketplace or chat app). No app store, one codebase for phone an
 ### 3.9 Selling across languages and formats
 A listing can be translated with one tap (Muse Spark, text only, cached per language). The agent
 can group low-value items into a lot, checked against 70 % of the items' floor prices. Each item
-can get a 10-second vertical video ad: its real product shot under a slow zoom, the price and a
-hook line written by Muse Spark, encoded locally (PyAV/H.264). Generative video was ruled out:
-it needs a GPU and would show an item that is not the one for sale.
+can get a 5-second vertical "shelf to studio" clip: the real photo, a spotlight from the item's
+SAM 3.1 mask, a push-in, then its product shot with a hook line written by Muse Spark, encoded
+locally (PyAV/H.264); and a 3-second 360° turn rendered from its SAM 3D Objects model on a Modal
+GPU. Generative video was ruled out: it would show an item that is not the one for sale.
 
 ## 4. Evaluation
 

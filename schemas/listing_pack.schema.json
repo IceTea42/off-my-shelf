@@ -301,7 +301,7 @@
           "title": "Product Shots",
           "type": "array"
         },
-        "voice_note": {
+        "owner_note": {
           "anyOf": [
             {
               "maxLength": 2000,
@@ -312,7 +312,8 @@
             }
           ],
           "default": null,
-          "title": "Voice Note"
+          "description": "What the owner told the AI about the item (typed or spoken)",
+          "title": "Owner Note"
         },
         "buyer_replies": {
           "default": [],
@@ -333,7 +334,7 @@
             }
           ],
           "default": null,
-          "description": "10 s vertical MP4 ad",
+          "description": "5 s vertical MP4 shelf-to-studio clip",
           "title": "Ad Video"
         },
         "turntable_video": {
@@ -690,7 +691,9 @@
       "enum": [
         "sell",
         "donate",
-        "recycle"
+        "recycle",
+        "bin",
+        "keep"
       ],
       "title": "TriageDecision",
       "type": "string"

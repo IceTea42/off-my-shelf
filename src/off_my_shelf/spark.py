@@ -200,7 +200,9 @@ seller; suggested sits between them. Explain the price in one sentence.
 {language}; be honest, specific and friendly; no emoji, no ALL CAPS, no contact details.
 - Tags: up to 8 short search words in {language}.
 - Triage: sell if it is worth more than about 5 EUR and in working order; donate if usable but \
-low value; recycle if broken or unsafe. Give the reason in one sentence.
+low value; recycle if broken or unsafe but its materials can be recycled; bin if it is rubbish \
+(packaging, worn out, dirty beyond use); keep if it is clearly not meant to go (the table or \
+shelf the items stand on, something only partly in the photo). Give the reason in one sentence.
 Reply with one JSON object only, no prose, in exactly this shape:
 {skeleton}"""
 
@@ -208,13 +210,23 @@ INVENTORY_SYSTEM = """You list the distinct physical items in a photo that someo
 donate or recycle, including stands, tables, trays and other movable furniture. Ignore fixed \
 parts of the room (walls, floors, windows, built-in shelves), food, and the surface the items \
 lie on when the photo is a close-up of them. Return at most \
-{limit} items, largest first. Each phrase is a short English noun phrase a segmentation model \
-can find, unique within the photo.
+{limit} items, largest first. Each phrase is a short English noun phrase (2 to 4 words) a \
+segmentation model can find, unique within the photo: tell look-alikes apart by colour, \
+material or size rather than by position words.
 Reply with one JSON object only, no prose, in exactly this shape:
 {skeleton}"""
 
 
-AD_SYSTEM = """You write the hook line of a 10-second vertical video ad for one second-hand \
+def correction_note(notes: str, previous_title: str) -> str:
+    """The owner's corrections, as the note that goes with the crop when the listing is redone."""
+    return (
+        f'{notes}\nYour previous listing was titled "{previous_title}" and was wrong. The owner '
+        "has the item in hand: trust them on what it is, its size, brand, material and "
+        "condition, and rewrite the whole listing and price accordingly."
+    )
+
+
+AD_SYSTEM = """You write the hook line of a 5-second vertical video ad for one second-hand \
 item, in {language}: at most 60 characters, catchy but honest (nothing that is not in the \
 listing), no emoji, no hashtags, no price.
 Reply with one JSON object only, no prose, in exactly this shape:
@@ -283,9 +295,20 @@ class SparkAnalyzer:
         return await self._structured(PipelineStep.ANALYZE, system, content, SceneInventory)
 
     async def analyze(
-        self, crop: Image.Image, language: Language, note: str | None = None
+        self,
+        crop: Image.Image,
+        language: Language,
+        subject: str | None = None,
+        note: str | None = None,
     ) -> SparkResult[ItemAnalysis]:
+        """The listing for the ``subject`` (the inventory's phrase) in the crop: a crop around a
+        sofa also shows the cushions on it, and the listing must be the sofa's."""
         text = "Create the listing for this item."
+        if subject:
+            text = (
+                f"Create the listing for this item: {subject}. The photo is cropped around it; "
+                "other things in view are not part of it."
+            )
         if note:
             text += f"\nThe owner says: {note}"
         system = ANALYZE_SYSTEM.format(
@@ -484,13 +507,13 @@ class ListingChain:
         self.providers = list(providers)
 
     async def analyze(
-        self, crop: Image.Image, language: Language
+        self, crop: Image.Image, language: Language, subject: str
     ) -> tuple[SparkResult[ItemAnalysis], list[str]]:
         """The listing, and the providers that failed before it (for the run log)."""
         failed: list[str] = []
         for provider in self.providers:
             try:
-                result = await provider.analyzer.analyze(crop, language)
+                result = await provider.analyzer.analyze(crop, language, subject)
             except (OpenAIError, SparkReplyError, OfflineCacheMissError) as error:
                 failed.append(f"{provider.name} ({type(error).__name__})")
                 if provider is self.providers[-1]:

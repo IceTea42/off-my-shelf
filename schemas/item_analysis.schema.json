@@ -216,7 +216,9 @@
       "enum": [
         "sell",
         "donate",
-        "recycle"
+        "recycle",
+        "bin",
+        "keep"
       ],
       "title": "TriageDecision",
       "type": "string"

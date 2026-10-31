@@ -67,8 +67,10 @@ def test_strict_schema_is_flat_and_fully_required() -> None:
 
 async def test_analyze_valid_reply_then_offline_cache(tmp_path: Path) -> None:
     analyzer, client = _analyzer(tmp_path, [VALID])
-    result = await analyzer.analyze(_image(), Language.FR, note="works fine")
+    result = await analyzer.analyze(_image(), Language.FR, "sofa", note="works fine")
     assert result.value.identification.name
+    sent = str(client.chat.completions.calls[0]["messages"])
+    assert "this item: sofa" in sent and "works fine" in sent
     assert result.call.input_tokens == 1000 and result.call.cost_usd == pytest.approx(0.00210)
     sent = client.chat.completions.calls[0]
     assert sent["response_format"]["type"] == "json_schema"
@@ -76,7 +78,7 @@ async def test_analyze_valid_reply_then_offline_cache(tmp_path: Path) -> None:
     assert "works fine" in sent["messages"][1]["content"][0]["text"]
 
     offline, _ = _analyzer(tmp_path, None)
-    again = await offline.analyze(_image(), Language.FR, note="works fine")
+    again = await offline.analyze(_image(), Language.FR, "sofa", note="works fine")
     assert again.call.cached is True
     assert again.value == result.value
 

@@ -39,6 +39,7 @@ from off_my_shelf.schema import (
     Triage,
     TriageDecision,
 )
+from off_my_shelf.tracing import record_calls
 from off_my_shelf.voice import Transcriber
 
 MAX_STEPS = 12
@@ -89,7 +90,7 @@ TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "set_triage",
-            "description": "Decide whether an item is sold, donated or recycled.",
+            "description": "Decide whether an item is sold, donated, recycled, binned or kept.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -212,8 +213,9 @@ def check_bundle(items: list[Item], price: float, already_bundled: set[str]) -> 
         return "a lot needs at least two different items"
     if already_bundled:
         return f"already in a lot: {', '.join(sorted(already_bundled))}"
-    if any(i.analysis.triage.decision is TriageDecision.RECYCLE for i in items):
-        return "items to recycle cannot be sold in a lot"
+    leaving = {TriageDecision.SELL, TriageDecision.DONATE}
+    if any(i.analysis.triage.decision not in leaving for i in items):
+        return "only items to sell or donate can go in a lot"
     if len({i.analysis.price.currency for i in items}) > 1:
         return "items are priced in different currencies"
     floor = BUNDLE_FLOOR_SHARE * sum(floor_price(i) for i in items)
@@ -544,5 +546,6 @@ async def run_agent(
     if apply:
         save_pack(pack_dir, result.pack)
         await asyncio.to_thread(export_pack, pack_dir)
+    record_calls(result.calls, run=pack_dir.parent.name)
     cost = sum(c.cost_usd or 0.0 for c in result.calls if not c.cached)
     return AgentOutcome(goal, result.actions, result.summary, result.accepted, cost)

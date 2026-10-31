@@ -125,7 +125,7 @@ def main(argv: list[str] | None = None) -> None:
     export.add_argument("pack", type=Path, help="pack folder containing listing_pack.json")
     export.set_defaults(handler=_export)
 
-    ads = commands.add_parser("ads", help="10 s vertical video ad per item to sell")
+    ads = commands.add_parser("ads", help="5 s vertical shelf-to-studio clip per item to sell")
     ads.add_argument("pack", type=Path, help="pack folder containing listing_pack.json")
     ads.add_argument("--offline", action="store_true", help="no hook line (no API call)")
     ads.set_defaults(handler=_ads)

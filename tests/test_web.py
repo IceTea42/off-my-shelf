@@ -236,3 +236,26 @@ def test_translate_once_then_from_the_pack(tmp_path: Path, monkeypatch: pytest.M
             ).status_code
             == 404
         )
+
+
+def test_owner_fix_rewrites_the_listing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = FakeMetaClient([])
+    cache = DiskCache(tmp_path / "cache")
+    monkeypatch.setattr(web, "build_services", lambda *_, **__: fake_services(fake, cache))
+    settings = _settings(tmp_path).model_copy(update={"meta_api_key": SecretStr("k")})
+    with TestClient(web.create_app(settings)) as client:
+        run_id = client.post("/api/demo").json()["run_id"]
+        item = client.post(
+            f"/api/runs/{run_id}/items/item-002/fix", data={"correction": "it's an eraser, 4 cm"}
+        ).json()
+        assert item["owner_note"] == "it's an eraser, 4 cm" and item["ad_video"] is None
+        sent = str(fake.chat_calls[-1]["messages"])
+        assert "eraser, 4 cm" in sent and "trust them" in sent
+        again = client.post(f"/api/runs/{run_id}/items/item-002/fix", data={"correction": "blue"})
+        assert again.json()["owner_note"] == "it's an eraser, 4 cm\nblue"
+        assert (
+            client.post(
+                f"/api/runs/{run_id}/items/item-002/fix", data={"correction": ""}
+            ).status_code
+            == 422
+        )

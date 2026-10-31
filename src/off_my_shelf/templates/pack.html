@@ -47,9 +47,9 @@
 <body>
 <header>
   <h1>Off My Shelf</h1>
-  <div class="stats">{{ pack.items|length }} items · {{ counts.sell }} to sell
+  <div class="stats">{{ items|length }} items · {{ counts.sell }} to sell
     (about {{ "%.0f"|format(total_value) }} {{ currency }}) · {{ counts.donate }} to donate ·
-    {{ counts.recycle }} to recycle</div>
+    {{ counts.recycle }} to recycle · {{ counts.bin }} rubbish</div>
   {% if pack.warnings %}
   <ul class="warnings">{% for warning in pack.warnings %}<li>Skipped: {{ warning }}</li>{% endfor %}</ul>
   {% endif %}
@@ -68,7 +68,7 @@
     </div>
   </article>
 {% endfor %}
-{% for item in pack.items %}
+{% for item in items %}
 {% set a = item.analysis %}
   <article class="card" id="{{ item.item_id }}">
     <div class="photos{% if not item.product_shots %} single{% endif %}">

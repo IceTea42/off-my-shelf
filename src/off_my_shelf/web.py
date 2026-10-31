@@ -22,6 +22,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from openai import OpenAIError
+from PIL import Image
 from pydantic import BaseModel, Field
 
 from off_my_shelf.agent import (
@@ -40,8 +41,9 @@ from off_my_shelf.meta_client import describe_error, make_client
 from off_my_shelf.mocks import PACK_FILENAME, load_pack, save_pack
 from off_my_shelf.pipeline import Pipeline, build_services
 from off_my_shelf.report import live_cost
-from off_my_shelf.schema import Item, Language, ListingPack
-from off_my_shelf.tracing import trace_app
+from off_my_shelf.schema import Item, Language, ListingPack, ModelCall
+from off_my_shelf.spark import SparkReplyError, correction_note
+from off_my_shelf.tracing import record_calls, trace_app
 from off_my_shelf.trials import (
     RUNS_PER_HOUR,
     VISITOR_ID,
@@ -170,6 +172,11 @@ class _State:
     def offline(self) -> bool:
         return self.settings.meta_api_key is None
 
+    def charge(self, call: ModelCall, run: str, item: str | None = None) -> None:
+        """Count a live call against the budget and log it for the Logfire dashboard."""
+        self.spent_usd += 0.0 if call.cached else call.cost_usd or 0.0
+        record_calls([call], run=run, item=item)
+
     def require_live(self) -> None:
         """Live calls need a key and, on a public deployment, budget left."""
         if self.offline:
@@ -253,6 +260,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     _run_routes(app, state)
     _voice_routes(app, state)
     _item_routes(app, state)
+    _model_routes(app, state)
     _agent_routes(app, state)
     _trial_routes(app, state)
     _proposal_routes(app, state)
@@ -394,7 +402,7 @@ def _voice_routes(app: FastAPI, state: _State) -> None:
             logger.exception("Voice Transcribe failed: %s", detail)
             raise HTTPException(502, f"Voice Transcribe failed: {detail}") from error
         keep("result.txt", text.encode())
-        state.spent_usd += 0.0 if call.cached else call.cost_usd or 0.0
+        state.charge(call, run="voice")
         if not text:
             raise HTTPException(
                 422, f"No speech recognised in {seconds:.1f} s of audio: check the microphone."
@@ -424,12 +432,12 @@ def _item_routes(app: FastAPI, state: _State) -> None:
         item.calls = [*item.calls, result.call]
         save_pack(target, pack)
         await asyncio.to_thread(export_pack, target)
-        state.spent_usd += 0.0 if result.call.cached else result.call.cost_usd or 0.0
+        state.charge(result.call, run=run_id, item=item_id)
         return result.value.model_dump(mode="json")
 
     @app.post("/api/runs/{run_id}/items/{item_id}/ad")
     async def video_ad(run_id: str, item_id: str) -> dict[str, str]:
-        """A 10 s vertical MP4 ad from the item's real shot; offline it has no hook line."""
+        """A 5 s vertical shelf-to-studio clip from the item's real photo; offline, no hook."""
         target, pack, item = state.item(run_id, item_id)
         if item.ad_video is None:
             if not state.offline:
@@ -441,9 +449,13 @@ def _item_routes(app: FastAPI, state: _State) -> None:
                 raise HTTPException(502, f"Video ad failed: {describe_error(error)}") from error
             if call is not None:
                 item.calls = [*item.calls, call]
-                state.spent_usd += 0.0 if call.cached else call.cost_usd or 0.0
+                state.charge(call, run=run_id, item=item_id)
             save_pack(target, pack)
         return {"video": item.ad_video}
+
+
+def _model_routes(app: FastAPI, state: _State) -> None:
+    """Per-item work that redoes or extends the listing: 3D turn, owner's fix."""
 
     @app.post("/api/runs/{run_id}/items/{item_id}/turn")
     async def turn(run_id: str, item_id: str) -> dict[str, str | None]:
@@ -456,9 +468,37 @@ def _item_routes(app: FastAPI, state: _State) -> None:
             except (TurntableError, httpx.HTTPError) as error:
                 raise HTTPException(502, f"3D turn failed: {error}") from error
             item.calls = [*item.calls, call]
-            state.spent_usd += call.cost_usd or 0.0
+            state.charge(call, run=run_id, item=item_id)
             save_pack(target, pack)
         return {"video": item.turntable_video, "model": item.model_3d}
+
+    @app.post("/api/runs/{run_id}/items/{item_id}/fix")
+    async def fix(
+        run_id: str,
+        item_id: str,
+        correction: Annotated[str, Form(min_length=2, max_length=500)],
+    ) -> dict[str, Any]:
+        """Rewrite the listing from the owner's correction ("4 cm, it's an eraser")."""
+        target, pack, item = state.item(run_id, item_id)
+        state.require_live()
+        notes = "\n".join(filter(None, [item.owner_note, correction.strip()]))[-2000:]
+        with Image.open(target / item.detection.crop_path) as raw:
+            crop = raw.convert("RGB")
+        spark = build_services(state.settings, product_shots=False).spark
+        try:
+            result = await spark.analyze(
+                crop,
+                item.analysis.listing.language,
+                note=correction_note(notes, item.analysis.listing.title),
+            )
+        except (OpenAIError, SparkReplyError) as error:
+            raise HTTPException(502, f"Fix failed: {describe_error(error)}") from error
+        item.analysis, item.owner_note = result.value, notes
+        item.translations, item.ad_video = [], None  # both told the old story
+        item.calls = [*item.calls, result.call]
+        state.charge(result.call, run=run_id, item=item_id)
+        save_pack(target, pack)
+        return item.model_dump(mode="json")
 
 
 def _proposal_routes(app: FastAPI, state: _State) -> None:

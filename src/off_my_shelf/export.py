@@ -8,7 +8,7 @@ from urllib.parse import quote
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 from off_my_shelf.mocks import load_pack
-from off_my_shelf.schema import ListingPack, TriageDecision
+from off_my_shelf.schema import Item, ListingPack, TriageDecision
 
 INDEX_FILENAME = "index.html"
 FAVICON = quote((Path(__file__).parent / "static" / "favicon.svg").read_text(encoding="utf-8"))
@@ -27,6 +27,7 @@ def render_html(pack: ListingPack) -> str:
     currencies = {i.analysis.price.currency for i in selling} or {"EUR"}
     return _env.get_template("pack.html").render(
         pack=pack,
+        items=listed(pack),
         counts={d.value: counts.get(d.value, 0) for d in TriageDecision},
         total_value=sum(i.analysis.price.suggested for i in selling),
         currency="/".join(sorted(currencies)),
@@ -35,10 +36,18 @@ def render_html(pack: ListingPack) -> str:
     )
 
 
+UNLISTED = frozenset({TriageDecision.BIN, TriageDecision.KEEP})  # marked on the photo only
+
+
+def listed(pack: ListingPack) -> list[Item]:
+    """The items that leave the home (sell, donate, recycle): the ones that get a listing."""
+    return [item for item in pack.items if item.analysis.triage.decision not in UNLISTED]
+
+
 def listing_text(pack: ListingPack) -> dict[str, str]:
-    """Ready-to-paste text per item (with its translations) and per bundle, keyed by id."""
+    """Ready-to-paste text per listed item (with its translations) and per bundle, keyed by id."""
     texts = {}
-    for item in pack.items:
+    for item in listed(pack):
         a = item.analysis
         price = f"{a.price.suggested:.0f} {a.price.currency}"
         texts[item.item_id] = "\n---\n\n".join(

@@ -1,0 +1,570 @@
+{
+  "kind": "Dashboard",
+  "metadata": {
+    "name": "Off My Shelf: cost, speed, agent",
+    "project": "off-my-shelf"
+  },
+  "spec": {
+    "display": {
+      "name": "Off My Shelf: cost, speed, agent",
+      "description": "List cost per step, model and provider, latency, runs and the agent's checks. Built on the 'model call' logs (tracing.record_calls)."
+    },
+    "panels": {
+      "kpis": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Totals"
+          },
+          "plugin": {
+            "kind": "Values",
+            "spec": {}
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "LogfireTimeSeriesQuery",
+                  "spec": {
+                    "query": "select\n  round(sum((attributes->>'cost_usd')::double), 4) as \"List cost ($)\",\n  count(*) filter (where (attributes->>'cached') = 'false') as \"Live calls\",\n  round(100.0 * count(*) filter (where (attributes->>'cached') = 'true') / count(*), 1) as \"Cache hits (%)\",\n  count(distinct attributes->>'run') as \"Runs\"\nfrom records where span_name = 'model call {step} {model}'"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "cost_time": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Cost over time, by step"
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "yAxis": {
+                "show": true,
+                "label": "$"
+              },
+              "legend": {
+                "position": "bottom"
+              },
+              "visual": {
+                "display": "line"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "LogfireTimeSeriesQuery",
+                  "spec": {
+                    "query": "select\n  time_bucket($resolution, start_timestamp) as x,\n  sum((attributes->>'cost_usd')::double) filter (where attributes->>'step' = 'segment') as \"SAM 3.1 masks\",\n  sum((attributes->>'cost_usd')::double) filter (where attributes->>'step' = 'analyze') as \"Muse Spark listings\",\n  sum((attributes->>'cost_usd')::double) filter (where attributes->>'step' = 'product_shot') as \"Muse Image shots\",\n  sum((attributes->>'cost_usd')::double) filter (where attributes->>'step' = 'triage') as \"Agent\",\n  sum((attributes->>'cost_usd')::double) filter (where attributes->>'step' in ('transcribe', 'ad', 'turntable')) as \"Voice, ads, 3D\"\nfrom records where span_name = 'model call {step} {model}' group by x",
+                    "metrics": [
+                      "SAM 3.1 masks",
+                      "Muse Spark listings",
+                      "Muse Image shots",
+                      "Agent",
+                      "Voice, ads, 3D"
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "cost_step": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Where the money goes (by step)"
+          },
+          "plugin": {
+            "kind": "BarChart",
+            "spec": {
+              "mode": "value",
+              "sort": "desc",
+              "format": {
+                "unit": "decimal",
+                "shortValues": true
+              },
+              "showValues": true,
+              "calculation": "last"
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "LogfireTimeSeriesQuery",
+                  "spec": {
+                    "query": "select * from (\n  select attributes->>'step' as step, round(sum((attributes->>'cost_usd')::double), 4) as cost\n  from records where span_name = 'model call {step} {model}' group by step) order by cost desc",
+                    "metrics": [],
+                    "groupBy": "step"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "cost_provider": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Who served it (Meta, Baseten, Modal)"
+          },
+          "plugin": {
+            "kind": "BarChart",
+            "spec": {
+              "mode": "value",
+              "sort": "desc",
+              "format": {
+                "unit": "decimal",
+                "shortValues": true
+              },
+              "showValues": true,
+              "calculation": "last"
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "LogfireTimeSeriesQuery",
+                  "spec": {
+                    "query": "select * from (\n  select attributes->>'provider' as provider, count(*) as calls\n  from records where span_name = 'model call {step} {model}' and (attributes->>'cached') = 'false' group by provider) order by calls desc",
+                    "metrics": [],
+                    "groupBy": "provider"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "cost_item": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Cost per item, by run",
+            "description": "List cost of each run divided by its items"
+          },
+          "plugin": {
+            "kind": "BarChart",
+            "spec": {
+              "mode": "value",
+              "sort": "desc",
+              "format": {
+                "unit": "decimal",
+                "shortValues": true
+              },
+              "showValues": true,
+              "calculation": "last"
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "LogfireTimeSeriesQuery",
+                  "spec": {
+                    "query": "select * from (\n  select attributes->>'run' as run, round(sum((attributes->>'cost_usd')::double) / count(distinct attributes->>'item'), 4) as per_item\n  from records where span_name = 'model call {step} {model}' and attributes->>'item' is not null group by run) order by per_item desc limit 15",
+                    "metrics": [],
+                    "groupBy": "run"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "latency": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Median latency by model and provider (s)"
+          },
+          "plugin": {
+            "kind": "BarChart",
+            "spec": {
+              "mode": "value",
+              "sort": "desc",
+              "format": {
+                "unit": "decimal",
+                "shortValues": true
+              },
+              "showValues": true,
+              "calculation": "last"
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "LogfireTimeSeriesQuery",
+                  "spec": {
+                    "query": "select * from (\n  select (attributes->>'model') || ' @ ' || (attributes->>'provider') as model,\n         round(approx_percentile_cont((attributes->>'latency_ms')::double, 0.5) / 1000, 2) as seconds\n  from records where span_name = 'model call {step} {model}' and attributes->>'latency_ms' is not null group by model) order by seconds desc",
+                    "metrics": [],
+                    "groupBy": "model"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "latency_time": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "p95 latency over time (s)"
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "yAxis": {
+                "show": true,
+                "label": "s"
+              },
+              "legend": {
+                "position": "bottom"
+              },
+              "visual": {
+                "display": "line"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "LogfireTimeSeriesQuery",
+                  "spec": {
+                    "query": "select\n  time_bucket($resolution, start_timestamp) as x,\n  approx_percentile_cont((attributes->>'latency_ms')::double, 0.95) filter (where attributes->>'step' = 'segment') / 1000 as \"SAM 3.1\",\n  approx_percentile_cont((attributes->>'latency_ms')::double, 0.95) filter (where attributes->>'step' = 'analyze') / 1000 as \"Listing\",\n  approx_percentile_cont((attributes->>'latency_ms')::double, 0.95) filter (where attributes->>'step' = 'product_shot') / 1000 as \"Muse Image\"\nfrom records where span_name = 'model call {step} {model}' group by x",
+                    "metrics": [
+                      "SAM 3.1",
+                      "Listing",
+                      "Muse Image"
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "runs": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Runs: items found and warnings"
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "yAxis": {
+                "show": true,
+                "label": "count"
+              },
+              "legend": {
+                "position": "bottom"
+              },
+              "visual": {
+                "display": "line"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "LogfireTimeSeriesQuery",
+                  "spec": {
+                    "query": "select\n  time_bucket($resolution, start_timestamp) as x,\n  sum((attributes->>'items')::int) as \"Items\",\n  sum((attributes->>'warnings')::int) as \"Warnings\",\n  count(*) as \"Runs\"\nfrom records where span_name = 'pipeline run' group by x",
+                    "metrics": [
+                      "Items",
+                      "Warnings",
+                      "Runs"
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "run_time": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Run duration (s)"
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "yAxis": {
+                "show": true,
+                "label": "s"
+              },
+              "legend": {
+                "position": "bottom"
+              },
+              "visual": {
+                "display": "line"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "LogfireTimeSeriesQuery",
+                  "spec": {
+                    "query": "select\n  time_bucket($resolution, start_timestamp) as x,\n  max(duration) as \"Slowest run\", avg(duration) as \"Average run\"\nfrom records where span_name = 'pipeline run' group by x",
+                    "metrics": [
+                      "Slowest run",
+                      "Average run"
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "agent": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Agent actions: allowed vs blocked by its checks"
+          },
+          "plugin": {
+            "kind": "BarChart",
+            "spec": {
+              "mode": "value",
+              "sort": "desc",
+              "format": {
+                "unit": "decimal",
+                "shortValues": true
+              },
+              "showValues": true,
+              "calculation": "last"
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "LogfireTimeSeriesQuery",
+                  "spec": {
+                    "query": "select * from (\n  select (attributes->>'tool') || case when level >= 13 then ' (blocked)' else '' end as action,\n         count(*) as n\n  from records where span_name = 'tool {tool}' group by action) order by n desc",
+                    "metrics": [],
+                    "groupBy": "action"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "errors": {
+        "kind": "Panel",
+        "spec": {
+          "display": {
+            "name": "Errors and exceptions"
+          },
+          "plugin": {
+            "kind": "TimeSeriesChart",
+            "spec": {
+              "yAxis": {
+                "show": true,
+                "label": "count"
+              },
+              "legend": {
+                "position": "bottom"
+              },
+              "visual": {
+                "display": "line"
+              }
+            }
+          },
+          "queries": [
+            {
+              "kind": "TimeSeriesQuery",
+              "spec": {
+                "plugin": {
+                  "kind": "LogfireTimeSeriesQuery",
+                  "spec": {
+                    "query": "select\n  time_bucket($resolution, start_timestamp) as x, count(*) as \"Errors\"\nfrom records where level >= 17 or is_exception group by x",
+                    "metrics": [
+                      "Errors"
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "layouts": [
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Cost",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 24,
+              "height": 4,
+              "content": {
+                "$ref": "#/spec/panels/kpis"
+              }
+            },
+            {
+              "x": 0,
+              "y": 4,
+              "width": 24,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/cost_time"
+              }
+            },
+            {
+              "x": 0,
+              "y": 12,
+              "width": 12,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/cost_step"
+              }
+            },
+            {
+              "x": 12,
+              "y": 12,
+              "width": 12,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/cost_provider"
+              }
+            },
+            {
+              "x": 0,
+              "y": 20,
+              "width": 24,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/cost_item"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Speed",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/latency"
+              }
+            },
+            {
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/latency_time"
+              }
+            },
+            {
+              "x": 0,
+              "y": 8,
+              "width": 24,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/run_time"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "kind": "Grid",
+        "spec": {
+          "display": {
+            "title": "Runs and agent",
+            "collapse": {
+              "open": true
+            }
+          },
+          "items": [
+            {
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/runs"
+              }
+            },
+            {
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 8,
+              "content": {
+                "$ref": "#/spec/panels/agent"
+              }
+            },
+            {
+              "x": 0,
+              "y": 8,
+              "width": 24,
+              "height": 6,
+              "content": {
+                "$ref": "#/spec/panels/errors"
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "variables": [],
+    "annotations": [],
+    "duration": "7d",
+    "refreshInterval": "0s",
+    "links": []
+  }
+}

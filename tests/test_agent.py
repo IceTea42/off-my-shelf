@@ -258,7 +258,7 @@ def test_bundle_checks() -> None:
     assert check_bundle([third, fourth], 5, set()) is None  # 0.7 x 7 = 4.9
     assert "below the lot's floor" in (check_bundle([third, fourth], 4, set()) or "")
     assert "two different" in (check_bundle([third], 5, set()) or "")
-    assert "recycle" in (check_bundle([third, recycle], 5, set()) or "")
+    assert "sell or donate" in (check_bundle([third, recycle], 5, set()) or "")
     assert "already in a lot" in (check_bundle([third, fourth], 5, {"item-003"}) or "")
 
 

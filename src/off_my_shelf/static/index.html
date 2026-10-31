@@ -11,7 +11,7 @@
 <link rel="alternate icon" href="/favicon.ico" type="image/png">
 <style>
   :root { --bg:#f6f4ef; --card:#fff; --ink:#1d1c1a; --muted:#6b675f; --line:#e4e0d6;
-          --sell:#1f7a4d; --donate:#2f5fa7; --recycle:#8a5a12; }
+          --sell:#1f7a4d; --donate:#2f5fa7; --recycle:#8a5a12; --bin:#5c5a55; --keep:#9a968d; }
   * { box-sizing:border-box; }
   [hidden] { display:none !important; }
   body { margin:0; background:var(--bg); color:var(--ink);
@@ -53,6 +53,9 @@
   .badge { font-size:12px; font-weight:600; padding:2px 8px; border-radius:99px; color:#fff; }
   .sell { background:var(--sell); } .donate { background:var(--donate); }
   .recycle { background:var(--recycle); }
+  .bin { background:var(--bin); }
+  .keep { background:var(--keep); }
+  .source .box.unlisted { border-style:dashed; border-color:#fff; background:rgba(0,0,0,.25); }
   .desc { white-space:pre-line; font-size:14px; }
   .agent { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px;
            margin:12px 0 16px; display:grid; gap:10px; }
@@ -74,10 +77,10 @@
   .trial img, .trial .thumb { width:48px; height:48px; object-fit:cover; border-radius:8px; background:#eee; }
   .trial span { flex:1; }
   .trial button { min-height:36px; padding:4px 10px; }
-  .post { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
-  .post::before { content:attr(data-label); color:var(--muted); font-size:12px; }
-  .post:empty { display:none; }
-  .post .chip { text-decoration:none; display:inline-flex; align-items:center; border-radius:99px; }
+  .post { min-height:36px; max-width:100%; }
+  .fix { display:flex; gap:6px; }
+  .fix input { flex:1; min-width:0; }
+  #grid.running .fix { display:none; }
   #grid.running .post { display:none; }
   .rules summary { cursor:pointer; color:var(--muted); font-size:14px; }
   .rules label { display:grid; gap:4px; margin-top:8px; font-size:13px; color:var(--muted); }
@@ -176,7 +179,7 @@ const $ = (id) => document.getElementById(id);
 // The interface speaks the listing language picked in the form (English, French or Turkish).
 const UI = {
  "en": {
-  "lead": "Photograph or film the things you no longer use. Get ready-to-post listings, sorted into sell, donate and recycle.",
+  "lead": "Photograph or film the things you no longer use. Get ready-to-post listings, sorted into sell, donate, recycle or bin.",
   "snap": "Take a photo",
   "film": "Film the shelf",
   "drop": "Drop photos or videos here, or click to choose",
@@ -200,12 +203,19 @@ const UI = {
   "copyLot": "Copy lot listing",
   "copied": "Copied",
   "share": "Share",
-  "videoAd": "Video ad",
-  "shareAd": "Share video ad",
+  "videoAd": "Shelf to studio clip",
+  "shareAd": "Share the clip",
   "turn": "360° turn (3D)",
   "shareTurn": "Share 360° turn",
   "buyerPh": "Paste a buyer's message…",
   "draft": "Draft a reply",
+  "fix": "Fix with AI",
+  "sell": "sell",
+  "donate": "donate",
+  "recycle": "recycle",
+  "bin": "rubbish",
+  "keep": "stays",
+  "fixPh": "Wrong? e.g. \"eraser, 4 cm\"",
   "approve": "Approve and copy",
   "approved": "Approved: copied",
   "original": "Original photo",
@@ -222,7 +232,7 @@ const UI = {
   "lot": "lot of {n}"
  },
  "fr": {
-  "lead": "Photographiez ou filmez ce que vous n'utilisez plus. Obtenez des annonces prêtes à publier, triées entre vendre, donner et recycler.",
+  "lead": "Photographiez ou filmez ce que vous n'utilisez plus. Obtenez des annonces prêtes à publier, triées entre vendre, donner, recycler ou jeter.",
   "snap": "Prendre une photo",
   "film": "Filmer l'étagère",
   "drop": "Déposez des photos ou vidéos ici, ou cliquez pour choisir",
@@ -246,12 +256,19 @@ const UI = {
   "copyLot": "Copier l'annonce du lot",
   "copied": "Copié",
   "share": "Partager",
-  "videoAd": "Pub vidéo",
-  "shareAd": "Partager la pub vidéo",
+  "videoAd": "Clip de l'étagère au studio",
+  "shareAd": "Partager le clip",
   "turn": "Tour à 360° (3D)",
   "shareTurn": "Partager le tour à 360°",
   "buyerPh": "Collez le message d'un acheteur…",
   "draft": "Rédiger une réponse",
+  "fix": "Corriger avec l'IA",
+  "sell": "vendre",
+  "donate": "donner",
+  "recycle": "recycler",
+  "bin": "à jeter",
+  "keep": "reste",
+  "fixPh": "Erreur ? ex. « gomme, 4 cm »",
   "approve": "Approuver et copier",
   "approved": "Approuvé : copié",
   "original": "Photo d'origine",
@@ -268,7 +285,7 @@ const UI = {
   "lot": "lot de {n}"
  },
  "tr": {
-  "lead": "Artık kullanmadığınız eşyaların fotoğrafını veya videosunu çekin. Satış, bağış ve geri dönüşüm olarak ayrılmış, yayına hazır ilanlar alın.",
+  "lead": "Artık kullanmadığınız eşyaların fotoğrafını veya videosunu çekin. Satış, bağış, geri dönüşüm veya çöp olarak ayrılmış, yayına hazır ilanlar alın.",
   "snap": "Fotoğraf çek",
   "film": "Rafı videoya çek",
   "drop": "Fotoğraf veya videoları buraya bırakın ya da seçmek için tıklayın",
@@ -292,12 +309,19 @@ const UI = {
   "copyLot": "Toplu ilanı kopyala",
   "copied": "Kopyalandı",
   "share": "Paylaş",
-  "videoAd": "Video reklam",
-  "shareAd": "Video reklamı paylaş",
+  "videoAd": "Raftan stüdyoya klip",
+  "shareAd": "Klibi paylaş",
   "turn": "360° tur (3D)",
   "shareTurn": "360° turu paylaş",
   "buyerPh": "Alıcının mesajını yapıştırın…",
   "draft": "Yanıt taslağı yaz",
+  "fix": "YZ ile düzelt",
+  "sell": "sat",
+  "donate": "bağışla",
+  "recycle": "geri dönüştür",
+  "bin": "çöp",
+  "keep": "kalıyor",
+  "fixPh": "Yanlış mı? ör. \"silgi, 4 cm\"",
   "approve": "Onayla ve kopyala",
   "approved": "Onaylandı: kopyalandı",
   "original": "Orijinal fotoğraf",
@@ -389,19 +413,70 @@ function bundleCard(bundle, crops) {
   ]);
 }
 
-// Where to post each kind of item. None of these sites offers a public posting API, so the app
-// copies the listing and opens their "new listing" page (their app, on a phone).
+// Where to post each kind of item, grouped by region. None of these sites offers a public
+// posting API for private sellers, so the app copies the listing and opens their "new listing"
+// page (their app, on a phone); the person adds the photo and posts it themselves.
 const POST_TARGETS = {
-  sell: [
-    { name: "Leboncoin", url: "https://www.leboncoin.fr/deposer-une-annonce" },
-    { name: "Vinted", url: "https://www.vinted.fr/items/new" },
-    { name: "eBay", url: "https://www.ebay.fr/sl/sell" },
-  ],
-  donate: [
-    { name: "Geev", url: "https://www.geev.com/fr" },
-    { name: "Leboncoin (free)", url: "https://www.leboncoin.fr/deposer-une-annonce" },
-  ],
+  sell: {
+    "France": [
+      { name: "Leboncoin", url: "https://www.leboncoin.fr/deposer-une-annonce" },
+      { name: "Vinted", url: "https://www.vinted.fr/items/new" },
+      { name: "Vestiaire Collective", url: "https://www.vestiairecollective.com/sell-clothes-online/" },
+      { name: "Selency (furniture)", url: "https://www.selency.fr/" },
+    ],
+    "Everywhere": [
+      { name: "eBay", url: "https://www.ebay.fr/sl/sell" },
+      { name: "Etsy (vintage)", url: "https://www.etsy.com/your/shops/me/tools/listings/create" },
+      { name: "Facebook Marketplace", url: "https://www.facebook.com/marketplace/create/item" },
+    ],
+    "Türkiye": [
+      { name: "Sahibinden", url: "https://secure.sahibinden.com/ilan-ver" },
+      { name: "Dolap", url: "https://dolap.com/" },
+      { name: "Letgo", url: "https://www.letgo.com/" },
+    ],
+  },
+  donate: {
+    "France": [
+      { name: "Geev", url: "https://www.geev.com/fr/creer-annonce" },
+      { name: "Leboncoin (free)", url: "https://www.leboncoin.fr/deposer-une-annonce" },
+      { name: "Donnons.org", url: "https://donnons.org/" },
+    ],
+    "Everywhere": [
+      { name: "Facebook Marketplace (free)", url: "https://www.facebook.com/marketplace/create/item" },
+    ],
+  },
+  recycle: {
+    "France": [
+      { name: "Where to drop it (ADEME)", url: "https://quefairedemesdechets.ademe.fr/" },
+    ],
+  },
+  bin: {
+    "France": [
+      { name: "Bulky waste or tip (ADEME)", url: "https://quefairedemesdechets.ademe.fr/" },
+    ],
+  },
 };
+
+// A "Post on…" dropdown: picking a site copies the listing text and opens the site.
+function postMenu(decision, textOf, itemId) {
+  const groups = POST_TARGETS[decision];
+  if (!groups) return el("span");
+  const targets = Object.values(groups).flat();
+  const menu = el("select", { className: "post", ariaLabel: t("postOn") }, [
+    el("option", { value: "", textContent: `${t("postOn")}…` }),
+    ...Object.entries(groups).map(([region, sites]) => el("optgroup", { label: region },
+      sites.map((site) => el("option", { value: targets.indexOf(site), textContent: site.name })))),
+  ]);
+  menu.addEventListener("change", async () => {
+    const target = targets[Number(menu.value)];
+    menu.value = "";
+    if (!target) return;
+    window.open(target.url, "_blank", "noopener");
+    try { await navigator.clipboard.writeText(textOf()); } catch {}
+    log(`${itemId}: listing text copied, paste it in ${target.name} and add the photo`);
+  });
+  return menu;
+}
 
 function card(item, base) {
   const a = item.analysis;
@@ -457,16 +532,7 @@ function card(item, base) {
       item.detection.crop_path), `${item.item_id}.jpg`, texts[shown].title, textOf()).catch(() => {}));
     actions.push(share);
   }
-  const post = el("div", { className: "post" }, (POST_TARGETS[a.triage.decision] || []).map((target) => {
-    const link = el("a", { href: target.url, target: "_blank", rel: "noopener", className: "chip",
-      textContent: target.name });
-    link.addEventListener("click", async () => { // the app or site opens; the text is ready to paste
-      try { await navigator.clipboard.writeText(textOf()); } catch {}
-      log(`${item.item_id}: listing text copied, paste it in ${target.name} and add the photo`);
-    });
-    return link;
-  }));
-  post.dataset.label = t("postOn");
+  const post = postMenu(a.triage.decision, textOf, item.item_id);
   const ad = el("div", { className: "ad" });
   const showAd = () => ad.replaceChildren(el("video", { src: base + item.ad_video, controls: true,
     playsInline: true, preload: "metadata",
@@ -480,7 +546,7 @@ function card(item, base) {
       if (item.ad_video) {
         await shareFile(base + item.ad_video, `${item.item_id}.mp4`, texts[shown].title, textOf());
       } else {
-        log(`${item.item_id}: making a 10 s video ad from its real photo…`, "muted");
+        log(`${item.item_id}: making a 5 s shelf-to-studio clip from its real photo…`, "muted");
         item.ad_video = (await postForm(`/api/runs/${current}/items/${item.item_id}/ad`, new FormData())).video;
         showAd();
         adButton.textContent = t("shareAd");
@@ -513,12 +579,33 @@ function card(item, base) {
   const draft = el("button", { type: "button", className: "ghost", textContent: t("draft") });
   draft.addEventListener("click", () => ask.value.trim() &&
     callAgent({ buyer_item_id: item.item_id, buyer_message: ask.value.trim() }));
-  return el("article", { className: "card", id: item.item_id }, [
+  // Wrong listing? The owner says what it really is and Muse Spark rewrites it from the photo.
+  const fixText = el("input", { type: "text", placeholder: t("fixPh"), maxLength: 500 });
+  const fixButton = el("button", { type: "button", className: "ghost", textContent: t("fix") });
+  const fix = async () => {
+    const correction = fixText.value.trim();
+    if (correction.length < 2) return;
+    fixButton.disabled = true;
+    log(`${item.item_id}: rewriting the listing with your correction…`, "muted");
+    const body = new FormData();
+    body.append("correction", correction);
+    try {
+      const fixed = await postForm(`/api/runs/${current}/items/${item.item_id}/fix`, body);
+      root.replaceWith(card(fixed, base));
+      log(`${item.item_id}: listing rewritten: ${fixed.analysis.listing.title}`);
+    } catch (error) {
+      log(`Fix failed: ${error.message}`, "error");
+      fixButton.disabled = false;
+    }
+  };
+  fixButton.addEventListener("click", fix);
+  fixText.addEventListener("keydown", (e) => e.key === "Enter" && fix());
+  const root = el("article", { className: "card", id: item.item_id }, [
     el("div", { className: "photos" + (photos.length === 1 ? " single" : "") }, photos),
     el("div", { className: "body" }, [
       el("div", { className: "row" }, [
         title,
-        el("span", { className: `badge ${a.triage.decision}`, textContent: a.triage.decision }),
+        el("span", { className: `badge ${a.triage.decision}`, textContent: t(a.triage.decision) }),
       ]),
       el("div", { className: "row" }, [
         el("span", { className: "price", textContent: money(a.price.suggested) }),
@@ -532,9 +619,11 @@ function card(item, base) {
       ad,
       el("div", { className: "actions" }, actions),
       post,
+      el("div", { className: "fix" }, [fixText, fixButton]),
       el("div", { className: "buyer" }, [...replies, ask, draft]),
     ]),
   ]);
+  return root;
 }
 
 function show(run) {
@@ -550,9 +639,12 @@ function renderSources(pack, base) {
   $("sources").replaceChildren(...media.map((path) => {
     const boxes = pack.items.filter((i) => i.detection.source.media === path).map((item) => {
       const b = item.detection.bbox;
-      const box = el("a", { className: "box", href: `#${item.item_id}`,
-        textContent: String(Number(item.item_id.split("-")[1])),
-        title: item.analysis.listing.title });
+      const number = String(Number(item.item_id.split("-")[1]));
+      const box = unlisted(item)
+        ? el("span", { className: "box unlisted", textContent: `${number} · ${t(item.analysis.triage.decision)}`,
+            title: item.analysis.triage.reason })
+        : el("a", { className: "box", href: `#${item.item_id}`, textContent: number,
+            title: item.analysis.listing.title });
       Object.assign(box.style, { left: `${b.x0 * 100}%`, top: `${b.y0 * 100}%`,
         width: `${(b.x1 - b.x0) * 100}%`, height: `${(b.y1 - b.y0) * 100}%` });
       return box;
@@ -562,19 +654,28 @@ function renderSources(pack, base) {
   }));
 }
 
+// Rubbish ("bin") and things that stay ("keep", e.g. the table under the items) get no card:
+// they are only marked on the photo and named once in the log.
+const unlisted = (item) => ["bin", "keep"].includes(item.analysis.triage.decision);
+function logUnlisted(items) {
+  items.filter(unlisted).forEach((item) => log(`${item.item_id} (${item.analysis.listing.title}): ` +
+    `${t(item.analysis.triage.decision)}, not listed. ${item.analysis.triage.reason}`, "muted"));
+}
+
 // While a run is going, cards show as soon as their listing is ready (actions come at the end).
 function render(pack, base, running = false) {
   const items = pack.items;
   const selling = items.filter((i) => i.analysis.triage.decision === "sell");
   const value = selling.reduce((sum, i) => sum + i.analysis.price.suggested, 0);
-  $("summary").textContent = t("summary", { n: items.length, s: selling.length, v: Math.round(value) });
+  $("summary").textContent = t("summary", { n: items.filter((i) => !unlisted(i)).length,
+    s: selling.length, v: Math.round(value) });
   $("zip").href = `/api/runs/${current}/zip`;
   $("zip").hidden = running;
   $("bar").hidden = false;
   $("grid").classList.toggle("running", running);
   const crops = Object.fromEntries(items.map((i) => [i.item_id, base + i.detection.crop_path]));
   $("grid").replaceChildren(...(pack.bundles || []).map((b) => bundleCard(b, crops)),
-    ...items.map((item) => card(item, base)));
+    ...items.filter((i) => !unlisted(i)).map((item) => card(item, base)));
   renderSources(pack, base);
   if (!items.length && !running) log("No items found: try a closer photo.", "warn");
 }
@@ -594,6 +695,7 @@ async function follow(runId) {
     if (run.status === "done") {
       document.title = "✓ Off My Shelf";
       loadTrials().catch(() => {});
+      logUnlisted(run.pack.items);
       return show(run);
     }
     if (run.status === "error") { document.title = "⚠ Off My Shelf"; return log(run.error, "error"); }

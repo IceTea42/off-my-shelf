@@ -18,8 +18,9 @@ drafts replies to buyers that a person approves before sending.
   from the gallery into it, and share each listing or video ad to Leboncoin, Vinted or WhatsApp.
 - **Every language you sell in:** listings in English, French or Turkish, and any listing
   translated with one tap; speak your goal in any of them.
-- **A video ad per item:** a 10-second vertical clip (Reels, Shorts, TikTok) made from the
-  item's real photo, its price and a hook line.
+- **Two clips per item:** "Shelf to studio", a 5-second vertical clip (Reels, Shorts, TikTok)
+  where the item is spotlit in your real photo, the camera pushes in and it lands as its product
+  shot with a hook line; and a 3-second 360° turn of its 3D model (SAM 3D Objects on Modal).
 
 ## Quickstart
 
@@ -70,7 +71,7 @@ replays without network.
 uv run off-my-shelf run photos/ --out packs/shelf --lang fr   # photos or videos -> pack
 uv run off-my-shelf agent packs/shelf "moving Friday: sell fast, donate the books"
 uv run off-my-shelf agent packs/shelf --buyer item-001 "Would you take 5 euros?"
-uv run off-my-shelf ads packs/shelf                           # 10 s video ad per item to sell
+uv run off-my-shelf ads packs/shelf                           # 5 s shelf-to-studio clip per item to sell
 uv run off-my-shelf export packs/shelf                        # HTML page + zip
 uv run off-my-shelf costs packs/shelf                         # cost + latency per step
 uv run off-my-shelf make-demo packs/shelf                     # use a real run as the demo pack
@@ -85,6 +86,9 @@ uv run python -m off_my_shelf.smoke spark                     # one live call pe
 - Your rules bind it: items you never want to sell, and the largest discount you accept.
 - Buyer replies are drafts: the agent cannot send anything, a person approves each one.
 - Every model call and agent step can be traced in Pydantic Logfire (set `LOGFIRE_TOKEN`).
+  `docs/logfire/dashboard.json` is a ready dashboard (Dashboards → New → Custom → Import JSON):
+  list cost over time and by step, model and provider, latency, runs, and the agent's blocked
+  actions.
 - Every agent action is checked before it applies: a reply is rejected if it goes below the
   item's floor price or moves contact or payment off the marketplace, a lot if it goes below 70 %
   of its items' floors, and the agent is told why and tries again.

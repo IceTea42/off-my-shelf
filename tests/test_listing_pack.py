@@ -25,6 +25,7 @@ from off_my_shelf.export import export_pack, listing_text, render_html
 from off_my_shelf.mocks import MOCK_PACK_DIR, load_mock_pack, load_pack
 from off_my_shelf.product_shots import ProductPhotographer
 from off_my_shelf.report import step_costs
+from off_my_shelf.schema import TriageDecision
 from off_my_shelf.voice import AudioFormatError, Transcriber, to_api_wav, wav_seconds
 
 
@@ -124,6 +125,18 @@ def test_listing_text_has_price_and_tags() -> None:
     texts = listing_text(load_mock_pack())
     assert set(texts) == {item.item_id for item in load_mock_pack().items}
     assert all("Price:" in t and "Tags:" in t for t in texts.values())
+
+
+def test_rubbish_and_staying_items_get_no_listing() -> None:
+    pack = load_mock_pack()
+    table, rubbish = (item.model_copy(deep=True) for item in pack.items[:2])
+    table.analysis.triage.decision = TriageDecision.KEEP
+    rubbish.analysis.triage.decision = TriageDecision.BIN
+    mixed = pack.model_copy(update={"items": [table, rubbish, *pack.items[2:]]})
+    assert set(listing_text(mixed)) == {item.item_id for item in pack.items[2:]}
+    html = render_html(mixed)
+    assert f"{len(pack.items) - 2} items" in html and "1 rubbish" in html
+    assert table.analysis.listing.title not in html
 
 
 def test_export_pack_writes_page_text_and_zip(tmp_path: Path) -> None:

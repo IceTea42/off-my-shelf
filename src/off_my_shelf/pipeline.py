@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+import logfire
 from openai import OpenAIError
 
 from off_my_shelf.cache import DiskCache, OfflineCacheMissError
@@ -46,6 +47,7 @@ from off_my_shelf.spark import (
     SparkAnalyzer,
     SparkReplyError,
 )
+from off_my_shelf.tracing import record_calls
 
 DUPLICATE_IOU = 0.6
 SHOT_ATTEMPTS = 2
@@ -108,11 +110,16 @@ class _Found:
     slug: str
 
 
+QUALIFIER = re.compile(r"\s+(?:with|on|in|at|of|next to|behind|under|near|from)\s.*$")
+MIN_CONFIDENCE = 0.25  # below this the listing says "can't tell what this is": no card
+
+
 def fallback_phrases(item: SceneItem) -> list[str]:
-    """The phrase, then the short name, then the phrase's last word: 'black crossbody bag',
-    'handbag', 'bag' (each once, in that order)."""
-    words = item.phrase.split()
-    candidates = [item.phrase, item.short_name or "", words[-1] if words else ""]
+    """The phrase, its head without qualifiers, the short name, then the head's last word:
+    'yogurt maker with glass jars on left', 'yogurt maker', 'yogurt maker', 'maker'."""
+    head = QUALIFIER.sub("", item.phrase)
+    words = head.split()
+    candidates = [item.phrase, head, item.short_name or "", words[-1] if words else ""]
     return list(dict.fromkeys(c.strip() for c in candidates if c.strip()))
 
 
@@ -196,6 +203,16 @@ class Pipeline:
             or int(segment.mask.sum()) < self.settings.min_item_pixels
         )
 
+    def _identified(self, items: list[Item]) -> list[Item]:
+        """Drop the items Muse Spark could not identify (blurry, dark, too small)."""
+        for item in items:
+            if item.analysis.identification.confidence < MIN_CONFIDENCE:
+                self._warn(
+                    f"{item.item_id}: could not tell what it is "
+                    f"({item.analysis.identification.name}); take a closer photo"
+                )
+        return [i for i in items if i.analysis.identification.confidence >= MIN_CONFIDENCE]
+
     def _warn(self, message: str) -> None:
         self.warnings.append(message)
         self.progress(f"warning: {message}")
@@ -212,7 +229,10 @@ class Pipeline:
 
         self.partial = {}
         self._next_number = 0
-        per_file = await asyncio.gather(*(self._file(f, out_dir, language) for f in files))
+        with logfire.span("pipeline run", files=len(files)) as span:
+            per_file = await asyncio.gather(*(self._file(f, out_dir, language) for f in files))
+            span.set_attribute("items", sum(len(found) for _, found in per_file))
+            span.set_attribute("warnings", len(self.warnings))
         media_paths = [path for media, _ in per_file for path in media]
         if not media_paths:
             raise ValueError("every photo or frame was too small: " + "; ".join(self.warnings))
@@ -221,10 +241,12 @@ class Pipeline:
             run_id=f"run-{datetime.now(UTC):%Y%m%d-%H%M%S}",
             created_at=datetime.now(UTC),
             media=media_paths,
-            items=_drop_video_repeats(items),
+            items=self._identified(_drop_video_repeats(items)),
             warnings=self.warnings,
         )
         save_pack(out_dir, pack)
+        for item in pack.items:
+            record_calls(item.calls, run=pack.run_id, item=item.item_id)
         self.progress(f"done: {len(pack.items)} items")
         return pack
 
@@ -325,7 +347,9 @@ class Pipeline:
             (out_dir / rel).write_bytes(data)
 
         async with self._limit:
-            analysis, failed = await self.services.listing.analyze(item_crop, language)
+            analysis, failed = await self.services.listing.analyze(
+                item_crop, language, found.phrase
+            )
         if failed:
             self.progress(f"{stem}: listing fell back past {', '.join(failed)}")
         canvas = studio_canvas(image, found.segment.mask, box)
