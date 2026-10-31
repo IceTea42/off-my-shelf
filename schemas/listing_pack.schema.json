@@ -336,6 +336,34 @@
           "description": "10 s vertical MP4 ad",
           "title": "Ad Video"
         },
+        "turntable_video": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "3 s MP4 of the item's 3D model making one full turn",
+          "title": "Turntable Video"
+        },
+        "model_3d": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "GLB model (SAM 3D Objects)",
+          "title": "Model 3D"
+        },
         "translations": {
           "default": [],
           "description": "The listing in other languages, one per language",
@@ -543,7 +571,8 @@
         "transcribe",
         "triage",
         "buyer_reply",
-        "ad"
+        "ad",
+        "turntable"
       ],
       "title": "PipelineStep",
       "type": "string"

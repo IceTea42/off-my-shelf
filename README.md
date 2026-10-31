@@ -59,6 +59,7 @@ flowchart LR
 | **Muse Image 1.0** | Completes only the hidden parts of a partly covered item; every visible pixel stays the photo's own |
 | **Muse Voice Transcribe 1.0** | Turns a spoken goal ("sell fast, donate the books") into text for the agent |
 | **Muse Spark Open** | Writes the listings on open weights, served by Baseten (Modal as fallback); Muse Spark on the Meta API takes over if both are down |
+| **SAM 3D Objects** | Open weights on a Modal GPU: turns an item's photo and SAM 3.1 mask into a 3D model and a 3-second 360° turn |
 
 Every model result is cached on disk by input hash, so a re-run costs nothing and a demo
 replays without network.

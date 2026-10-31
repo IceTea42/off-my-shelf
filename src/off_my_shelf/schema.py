@@ -85,6 +85,7 @@ class PipelineStep(StrEnum):
     TRIAGE = "triage"
     BUYER_REPLY = "buyer_reply"
     AD = "ad"
+    TURNTABLE = "turntable"
 
 
 # --- Muse Spark structured output --------------------------------------------------------
@@ -206,6 +207,10 @@ class Item(_Model):
     voice_note: Annotated[str, Field(max_length=2000)] | None = None
     buyer_replies: list[BuyerReply] = []
     ad_video: RelPath | None = Field(default=None, description="10 s vertical MP4 ad")
+    turntable_video: RelPath | None = Field(
+        default=None, description="3 s MP4 of the item's 3D model making one full turn"
+    )
+    model_3d: RelPath | None = Field(default=None, description="GLB model (SAM 3D Objects)")
     translations: list[ListingText] = Field(
         default=[], description="The listing in other languages, one per language"
     )

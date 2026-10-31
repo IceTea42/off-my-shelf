@@ -27,7 +27,8 @@ def referenced_files(pack: ListingPack) -> set[str]:
     files = set(pack.media)
     for item in pack.items:
         files |= {item.detection.crop_path, *item.product_shots}
-        files |= {path for path in (item.detection.mask_path, item.ad_video) if path}
+        extras = (item.detection.mask_path, item.ad_video, item.turntable_video, item.model_3d)
+        files |= {path for path in extras if path}
     return files
 
 

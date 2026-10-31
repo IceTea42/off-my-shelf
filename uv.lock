@@ -1765,6 +1765,7 @@ source = { editable = "." }
 dependencies = [
     { name = "av" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "jinja2" },
     { name = "logfire", extra = ["fastapi"] },
     { name = "meta-sam-parser" },
@@ -1798,6 +1799,7 @@ dev = [
 requires-dist = [
     { name = "av", specifier = ">=19.0.2" },
     { name = "fastapi", specifier = ">=0.162.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "logfire", extras = ["fastapi"], specifier = ">=5.4.0" },
     { name = "meta-sam-parser", specifier = ">=0.1.0" },

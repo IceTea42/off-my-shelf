@@ -202,6 +202,8 @@ const UI = {
   "share": "Share",
   "videoAd": "Video ad",
   "shareAd": "Share video ad",
+  "turn": "360° turn (3D)",
+  "shareTurn": "Share 360° turn",
   "buyerPh": "Paste a buyer's message…",
   "draft": "Draft a reply",
   "approve": "Approve and copy",
@@ -246,6 +248,8 @@ const UI = {
   "share": "Partager",
   "videoAd": "Pub vidéo",
   "shareAd": "Partager la pub vidéo",
+  "turn": "Tour à 360° (3D)",
+  "shareTurn": "Partager le tour à 360°",
   "buyerPh": "Collez le message d'un acheteur…",
   "draft": "Rédiger une réponse",
   "approve": "Approuver et copier",
@@ -290,6 +294,8 @@ const UI = {
   "share": "Paylaş",
   "videoAd": "Video reklam",
   "shareAd": "Video reklamı paylaş",
+  "turn": "360° tur (3D)",
+  "shareTurn": "360° turu paylaş",
   "buyerPh": "Alıcının mesajını yapıştırın…",
   "draft": "Yanıt taslağı yaz",
   "approve": "Onayla ve kopyala",
@@ -487,6 +493,7 @@ function card(item, base) {
     }
   });
   actions.push(adButton);
+  if (turntableReady || item.turntable_video) actions.push(turnButton(item, base, ad));
   const defects = a.condition.defects.length ? ` · ${a.condition.defects.join(", ")}` : "";
   const mode = item.pricing_mode ? ` · ${item.pricing_mode.replace("_", " ")}` : "";
   const replies = item.buyer_replies.map((reply, index) => {
@@ -749,6 +756,36 @@ function ensureVisitor() {
   document.cookie = `oms_visitor=${id}; max-age=31536000; path=/; samesite=lax`;
 }
 
+// 360° turn: SAM 3D Objects builds the item's 3D model on a Modal GPU, then renders one full turn.
+let turntableReady = false;
+function turnButton(item, base, view) {
+  const show = () => view.replaceChildren(el("video", { src: base + item.turntable_video,
+    autoplay: true, loop: true, muted: true, playsInline: true }));
+  if (item.turntable_video) show();
+  const button = el("button", { type: "button", className: "ghost",
+    textContent: item.turntable_video ? t("shareTurn") : t("turn") });
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    try {
+      if (item.turntable_video) {
+        await shareFile(base + item.turntable_video, `${item.item_id}-360.mp4`, item.analysis.listing.title, "");
+      } else {
+        log(`${item.item_id}: building its 3D model (SAM 3D Objects on Modal, up to a few minutes the first time)…`, "muted");
+        const made = await postForm(`/api/runs/${current}/items/${item.item_id}/turn`, new FormData());
+        Object.assign(item, { turntable_video: made.video, model_3d: made.model });
+        show();
+        button.textContent = t("shareTurn");
+        log(`${item.item_id}: 3D model and 360° turn ready`);
+      }
+    } catch (error) {
+      log(`3D turn failed: ${error.message}`, "error");
+    } finally {
+      button.disabled = false;
+    }
+  });
+  return button;
+}
+
 async function loadTrials() {
   const rows = await (await fetch("/api/trials")).json();
   $("trials").hidden = rows.length === 0;
@@ -772,6 +809,7 @@ async function init() {
   ensureVisitor();
   loadTrials().catch(() => {});
   const config = await (await fetch("/api/config")).json();
+  turntableReady = config.turntable;
   $("language").replaceChildren(...config.languages.map((code) =>
     el("option", { value: code, textContent: LANG_NAMES[code] || code,
       selected: code === config.default_language })));

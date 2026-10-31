@@ -20,6 +20,22 @@ A new version goes to Modal first; the Space is updated only once Modal has been
 4. The Modal dashboard (modal.com/apps) shows each request, container time and cost;
    `uv run modal volume ls off-my-shelf-data runs` lists the stored runs.
 
+## 3D turn on a Modal GPU (SAM 3D Objects)
+
+1. Once: accept the licence at <https://huggingface.co/facebook/sam-3d-objects>, then set
+   `HF_TOKEN` (a read token) and `MODAL_SAM3D_KEY` (any secret string) in `.env`.
+2. Deploy (the first build takes about 30 minutes: it compiles PyTorch3D on a GPU):
+
+   ```
+   uv run modal deploy scripts/modal_sam3d.py
+   ```
+
+3. Put the printed `https://<you>--off-my-shelf-sam3d-sam3d-turntable.modal.run` address in
+   `.env` as `MODAL_SAM3D_URL`, then redeploy the web app. Each item card gets a
+   "360° turn (3D)" button. The first call also downloads the checkpoints into the Modal Volume
+   `sam3d-weights` and loads the model (a few minutes); later calls take well under a minute
+   while the GPU is warm (it idles down after 5 minutes).
+
 ## Hugging Face Space (backup)
 
 The Space `icetea/off-my-shelf` is public, on free ZeroGPU hardware. The Space uses the Gradio

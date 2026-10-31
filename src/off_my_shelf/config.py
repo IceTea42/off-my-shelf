@@ -44,6 +44,14 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MODAL_SPARK_OPEN_KEY", "OMS_MODAL_SPARK_OPEN_KEY"),
     )
 
+    # 3D: SAM 3D Objects on a Modal GPU (scripts/modal_sam3d.py) for the item's 360-degree turn
+    modal_sam3d_url: str | None = Field(
+        default=None, validation_alias=AliasChoices("MODAL_SAM3D_URL", "OMS_MODAL_SAM3D_URL")
+    )
+    modal_sam3d_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("MODAL_SAM3D_KEY", "OMS_MODAL_SAM3D_KEY")
+    )
+
     # Traces in Pydantic Logfire (off when unset; read from .env like the other keys)
     logfire_token: SecretStr | None = Field(
         default=None, validation_alias=AliasChoices("LOGFIRE_TOKEN", "OMS_LOGFIRE_TOKEN")

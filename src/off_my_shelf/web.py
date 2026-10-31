@@ -17,6 +17,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Any
 
+import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -51,6 +52,7 @@ from off_my_shelf.trials import (
     save_trial,
     visitor_trials,
 )
+from off_my_shelf.turntable import TurntableError, make_turntable
 from off_my_shelf.video_ad import make_item_ad
 from off_my_shelf.voice import AudioFormatError, Transcriber, to_api_wav, wav_seconds
 
@@ -291,6 +293,7 @@ def _page_routes(app: FastAPI, state: _State) -> None:
             "offline": state.offline,
             "languages": [lang.value for lang in Language],
             "default_language": state.settings.default_language.value,
+            "turntable": bool(state.settings.modal_sam3d_url and state.settings.modal_sam3d_key),
         }
 
 
@@ -441,6 +444,21 @@ def _item_routes(app: FastAPI, state: _State) -> None:
                 state.spent_usd += 0.0 if call.cached else call.cost_usd or 0.0
             save_pack(target, pack)
         return {"video": item.ad_video}
+
+    @app.post("/api/runs/{run_id}/items/{item_id}/turn")
+    async def turn(run_id: str, item_id: str) -> dict[str, str | None]:
+        """The item's 3D model (SAM 3D Objects on Modal) and its 3 s full turn."""
+        target, pack, item = state.item(run_id, item_id)
+        if item.turntable_video is None:
+            state.require_live()
+            try:
+                call = await make_turntable(state.settings, target, item)
+            except (TurntableError, httpx.HTTPError) as error:
+                raise HTTPException(502, f"3D turn failed: {error}") from error
+            item.calls = [*item.calls, call]
+            state.spent_usd += call.cost_usd or 0.0
+            save_pack(target, pack)
+        return {"video": item.turntable_video, "model": item.model_3d}
 
 
 def _proposal_routes(app: FastAPI, state: _State) -> None:

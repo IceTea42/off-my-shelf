@@ -116,6 +116,9 @@ def space_secrets(settings: Settings) -> dict[str, str]:
     secrets = {"META_API_KEY": settings.meta_api_key.get_secret_value()}
     if settings.baseten_api_key is not None:
         secrets["BASETEN_API_KEY"] = settings.baseten_api_key.get_secret_value()
+    if settings.modal_sam3d_url and settings.modal_sam3d_key is not None:
+        secrets["MODAL_SAM3D_URL"] = settings.modal_sam3d_url
+        secrets["MODAL_SAM3D_KEY"] = settings.modal_sam3d_key.get_secret_value()
     if settings.logfire_token is not None:
         secrets["LOGFIRE_TOKEN"] = settings.logfire_token.get_secret_value()
     if settings.modal_spark_open_url and settings.modal_spark_open_key is not None:
