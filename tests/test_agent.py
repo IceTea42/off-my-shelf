@@ -138,6 +138,14 @@ async def test_plain_answer_ends_the_session(tmp_path: Path) -> None:
     assert result.summary == "Nothing to change." and result.actions == []
 
 
+async def test_broken_tool_arguments_are_reported_back(tmp_path: Path) -> None:
+    broken = SimpleNamespace(id="c1", function=SimpleNamespace(name="list_items", arguments="{"))
+    model = _ScriptedModel([_reply(broken), _reply(content="Gave up.")])
+    result = await ShelfAgent(model, "m", DiskCache(tmp_path)).run(PACK, "hi")  # type: ignore[arg-type]
+    assert result.summary == "Gave up."
+    assert model.sent[1][-1]["content"] == "error: arguments are not valid JSON"
+
+
 async def test_run_agent_saves_pack_and_needs_a_goal(tmp_path: Path) -> None:
     pack_dir = tmp_path / "pack"
     shutil.copytree(MOCK_PACK_DIR, pack_dir)

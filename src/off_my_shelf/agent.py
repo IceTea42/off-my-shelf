@@ -424,10 +424,12 @@ class ShelfAgent:
                 try:
                     args = json.loads(function.get("arguments") or "{}")
                 except json.JSONDecodeError:
-                    output = "error: arguments are not valid JSON"
+                    args, output = {}, "error: arguments are not valid JSON"
                 else:
                     output = session.dispatch(function["name"], args)
-                logfire.info("tool {tool}", tool=function["name"], args=args, result=output)
+                # a blocked or broken call is a warning, so the Logfire view can filter on it
+                trace = logfire.warn if output.startswith(("rejected", "error")) else logfire.info
+                trace("tool {tool}", tool=function["name"], args=args, result=output)
                 messages.append(
                     {"role": "tool", "tool_call_id": tool_call["id"], "content": output}
                 )
