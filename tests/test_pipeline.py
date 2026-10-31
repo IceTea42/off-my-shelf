@@ -17,9 +17,9 @@ from off_my_shelf.cli import main
 from off_my_shelf.config import Settings
 from off_my_shelf.media import UnsupportedMediaError, collect_inputs, stills
 from off_my_shelf.mocks import load_pack
-from off_my_shelf.pipeline import Pipeline, Services, build_services, slugify
+from off_my_shelf.pipeline import Pipeline, Services, build_services, fallback_phrases, slugify
 from off_my_shelf.schema import Language
-from off_my_shelf.spark import ListingChain, ListingProvider, SparkAnalyzer
+from off_my_shelf.spark import ListingChain, ListingProvider, SceneItem, SparkAnalyzer
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -292,6 +292,35 @@ async def test_too_small_items_and_photos_are_skipped_with_warnings(tmp_path: Pa
     small_photo, small_item = sorted(pack.warnings, key=lambda w: "thumb" not in w)
     assert "thumb.png: 200x150 px is too small" in small_photo
     assert "'mug' covers only" in small_item
+
+
+def test_fallback_phrases() -> None:
+    item = SceneItem(phrase="black crossbody bag", label="Bag", short_name="handbag")
+    assert fallback_phrases(item) == ["black crossbody bag", "handbag", "bag"]
+    item = SceneItem(phrase="mug", label="Mug", short_name="mug")
+    assert fallback_phrases(item) == ["mug"]
+
+
+async def test_missed_phrase_is_retried_with_simpler_names(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    client = FakeMetaClient(phrases=["black crossbody bag"])
+    client.sam_misses = {"black crossbody bag"}  # found by its short name instead
+    pack = await Pipeline(_services(client, settings), settings).run(
+        [_photo(tmp_path / "in")], tmp_path / "out"
+    )
+    asked = [call["input"][0]["content"][0]["text"] for call in client.sam_calls]
+    assert asked == ["black crossbody bag", "bag"]
+    assert len(pack.items) == 1
+
+
+async def test_unfound_item_is_reported(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    client = FakeMetaClient(phrases=["blue bag", "mug"])
+    client.sam_misses = {"blue bag", "bag"}
+    pack = await Pipeline(_services(client, settings), settings).run(
+        [_photo(tmp_path / "in")], tmp_path / "out"
+    )
+    assert any("no mask for 'blue bag'" in warning for warning in pack.warnings)
 
 
 async def test_all_photos_too_small_is_an_error(tmp_path: Path) -> None:

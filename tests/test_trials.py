@@ -1,5 +1,6 @@
 """My trials: ownership, hiding, reopening after a restart, rolling buffer, rate limit."""
 
+import shutil
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -10,7 +11,9 @@ from pydantic import SecretStr
 from fakes import FakeMetaClient, fake_services
 from off_my_shelf import trials, web
 from off_my_shelf.cache import DiskCache
+from off_my_shelf.cli import main
 from off_my_shelf.config import Settings
+from off_my_shelf.mocks import MOCK_PACK_DIR, load_pack, save_pack
 from off_my_shelf.trials import RateLimiter, Trial, all_trials, prune, save_trial
 from test_web import _png, _settings, _wait
 
@@ -70,3 +73,17 @@ def test_live_runs_are_rate_limited(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     with TestClient(web.create_app(settings)) as client:
         assert client.post("/api/runs", files=upload).status_code == 202
         assert client.post("/api/runs", files=upload).status_code == 429
+
+
+def test_cli_lists_runs_with_warnings(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    now = datetime.now(UTC)
+    save_trial(tmp_path, Trial(run_id="a" * 12, visitor="visitor-1", created_at=now))
+    folder = trials.pack_dir(tmp_path, "b" * 12)
+    shutil.copytree(MOCK_PACK_DIR, folder)
+    pack = load_pack(folder)
+    save_pack(folder, pack.model_copy(update={"warnings": ["no mask for 'bag'"]}))
+    save_trial(tmp_path, Trial(run_id="b" * 12, visitor="visitor-2", created_at=now, hidden=True))
+    main(["runs", "--dir", str(tmp_path), "--warnings"])
+    out = capsys.readouterr().out
+    assert "2 runs" in out and "unfinished" in out and "hidden" in out
+    assert "warning: no mask for 'bag'" in out

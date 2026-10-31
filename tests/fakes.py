@@ -48,6 +48,7 @@ class FakeMetaClient:
         )
         self.inventory_json = inventory.model_dump_json()
         self.sam_text = sam_text
+        self.sam_misses: set[str] = set()  # phrases SAM finds nothing for
         self.chat_calls: list[dict[str, Any]] = []
         self.sam_calls: list[dict[str, Any]] = []
         self.image_calls: list[dict[str, Any]] = []
@@ -102,7 +103,8 @@ class FakeMetaClient:
 
     async def _responses(self, **kwargs: Any) -> AsyncIterator[SimpleNamespace]:  # noqa: ANN401
         self.sam_calls.append(kwargs)
-        text = self.sam_text
+        phrase = kwargs["input"][0]["content"][0]["text"]
+        text = "" if phrase in self.sam_misses else self.sam_text
 
         async def stream() -> AsyncIterator[SimpleNamespace]:
             yield SimpleNamespace(type="response.output_text.delta", delta=text)

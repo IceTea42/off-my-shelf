@@ -205,8 +205,9 @@ Reply with one JSON object only, no prose, in exactly this shape:
 {skeleton}"""
 
 INVENTORY_SYSTEM = """You list the distinct physical items in a photo that someone could sell, \
-donate or recycle, including stands, tables, trays and other movable furniture. Ignore only \
-fixed parts of the room (walls, floors, windows, built-in shelves) and food. Return at most \
+donate or recycle, including stands, tables, trays and other movable furniture. Ignore fixed \
+parts of the room (walls, floors, windows, built-in shelves), food, and the surface the items \
+lie on when the photo is a close-up of them. Return at most \
 {limit} items, largest first. Each phrase is a short English noun phrase a segmentation model \
 can find, unique within the photo.
 Reply with one JSON object only, no prose, in exactly this shape:

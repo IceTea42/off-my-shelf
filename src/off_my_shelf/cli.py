@@ -9,11 +9,12 @@ from off_my_shelf.config import get_settings
 from off_my_shelf.demo import DEMO_PACK_DIR, make_demo
 from off_my_shelf.evaluate import add_pack_to_eval, run_eval
 from off_my_shelf.export import export_pack
-from off_my_shelf.mocks import load_pack, save_pack
+from off_my_shelf.mocks import PACK_FILENAME, load_pack, save_pack
 from off_my_shelf.pipeline import Pipeline, build_services
 from off_my_shelf.report import markdown_table
 from off_my_shelf.schema import Language, TriageDecision
 from off_my_shelf.tracing import setup_tracing
+from off_my_shelf.trials import all_trials, pack_dir
 from off_my_shelf.video_ad import make_item_ad
 
 
@@ -25,6 +26,21 @@ def _run(args: argparse.Namespace) -> None:
     total = sum(call.cost_usd or 0.0 for item in pack.items for call in item.calls)
     print(f"{len(pack.items)} items -> {args.out / 'listing_pack.json'} (list cost ${total:.4f})")
     print(f"listing pack: {export_pack(args.out)}")
+
+
+def _runs(args: argparse.Namespace) -> None:
+    runs_dir = args.dir or get_settings().runs_dir
+    trials = all_trials(runs_dir)
+    print(f"{len(trials)} runs in {runs_dir} (newest first; the buffer keeps 300, 30 days)")
+    for trial in trials:
+        folder = pack_dir(runs_dir, trial.run_id)
+        pack = load_pack(folder) if (folder / PACK_FILENAME).is_file() else None
+        items = f"{len(pack.items)} items" if pack else "unfinished"
+        hidden = " hidden" if trial.hidden else ""
+        when = f"{trial.created_at:%Y-%m-%d %H:%M}"
+        print(f"{trial.run_id}  {when}  {trial.visitor[:8]}  {items}{hidden}")
+        for warning in pack.warnings if pack and args.warnings else []:
+            print(f"    warning: {warning}")
 
 
 def _export(args: argparse.Namespace) -> None:
@@ -148,6 +164,11 @@ def main(argv: list[str] | None = None) -> None:
     eval_add.add_argument("pack", type=Path, help="pack folder containing listing_pack.json")
     eval_add.add_argument("--dataset", type=Path, default=Path("data/eval/items.csv"))
     eval_add.set_defaults(handler=_eval_add)
+
+    runs = commands.add_parser("runs", help="list the web app's runs (the rolling buffer)")
+    runs.add_argument("--dir", type=Path, help="runs folder (default: the app's)")
+    runs.add_argument("--warnings", action="store_true", help="show each run's warnings")
+    runs.set_defaults(handler=_runs)
 
     serve = commands.add_parser("serve", help="start the web app")
     serve.add_argument("--host", help="interface, e.g. 0.0.0.0 to share on your network")

@@ -39,13 +39,20 @@ from off_my_shelf.schema import (
     ModelCall,
     SourceRef,
 )
-from off_my_shelf.spark import ListingChain, ListingProvider, SparkAnalyzer, SparkReplyError
+from off_my_shelf.spark import (
+    ListingChain,
+    ListingProvider,
+    SceneItem,
+    SparkAnalyzer,
+    SparkReplyError,
+)
 
 DUPLICATE_IOU = 0.6
 SHOT_ATTEMPTS = 2
 HIDDEN_MIN_SHARE = 0.02  # below this, tiny mask gaps are noise, not occlusion
 MAX_DRIFT = 0.12  # mean visible-pixel change above which a completion redrew the item
 CROP_PADDING = 0.08
+BACKGROUND_SHARE = 0.9  # a detection filling this much of the frame, next to others, is the surface
 Progress = Callable[[str], None]
 
 
@@ -99,6 +106,14 @@ class _Found:
     calls: tuple[ModelCall, ...]
     phrase: str
     slug: str
+
+
+def fallback_phrases(item: SceneItem) -> list[str]:
+    """The phrase, then the short name, then the phrase's last word: 'black crossbody bag',
+    'handbag', 'bag' (each once, in that order)."""
+    words = item.phrase.split()
+    candidates = [item.phrase, item.short_name or "", words[-1] if words else ""]
+    return list(dict.fromkeys(c.strip() for c in candidates if c.strip()))
 
 
 def _best(segments: Sequence[Segment]) -> Segment | None:
@@ -257,15 +272,29 @@ class Pipeline:
         unique = {item.phrase: item for item in inventory.value.items}
         self.progress(f"{media_path}: looking for {', '.join(unique) or 'nothing'}")
 
-        async def segment(phrase: str) -> tuple[Segment | None, ModelCall]:
+        async def segment(item: SceneItem) -> tuple[Segment | None, ModelCall]:
+            # SAM 3.1 can miss a precise phrase it finds in a plainer one: try simpler names next
+            first, *simpler = fallback_phrases(item)
             async with self._limit:
-                run = await self.services.sam.segment(still.image, phrase)
-            return _best(run.segments), run.call
+                run = await self.services.sam.segment(still.image, first)
+            for phrase in simpler:
+                if _best(run.segments) is not None:
+                    break
+                async with self._limit:
+                    run = await self.services.sam.segment(still.image, phrase)
+            seg, call = _best(run.segments), run.call
+            return seg, call
 
-        results = await asyncio.gather(*(segment(p) for p in unique))
+        results = await asyncio.gather(*(segment(item) for item in unique.values()))
+        frame = still.image.width * still.image.height
+        found_any = sum(seg is not None for seg, _ in results) > 1
         hits = []
         for item, (seg, call) in zip(unique.values(), results, strict=True):
             if seg is None:
+                self._warn(f"{media_path}: SAM 3.1 found no mask for '{item.phrase}'; skipped")
+                continue
+            if found_any and seg.box.area >= BACKGROUND_SHARE * frame:
+                self._warn(f"{media_path}: '{item.phrase}' fills the photo (the surface); skipped")
                 continue
             if self._too_small(seg):
                 pixels = int(seg.mask.sum())
