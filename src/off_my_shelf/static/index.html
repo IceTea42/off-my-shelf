@@ -65,6 +65,11 @@
   .reply.ok { border-color:var(--sell); }
   .buyer { display:grid; gap:6px; }
   .langs { display:flex; gap:6px; }
+  .post { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+  .post::before { content:"Post on"; color:var(--muted); font-size:12px; }
+  .post:empty { display:none; }
+  .post .chip { text-decoration:none; display:inline-flex; align-items:center; border-radius:99px; }
+  #grid.running .post { display:none; }
   .rules summary { cursor:pointer; color:var(--muted); font-size:14px; }
   .rules label { display:grid; gap:4px; margin-top:8px; font-size:13px; color:var(--muted); }
   .rules input { font:inherit; padding:8px 10px; border-radius:10px; border:1px solid var(--line); }
@@ -215,6 +220,20 @@ function bundleCard(bundle, crops) {
   ]);
 }
 
+// Where to post each kind of item. None of these sites offers a public posting API, so the app
+// copies the listing and opens their "new listing" page (their app, on a phone).
+const POST_TARGETS = {
+  sell: [
+    { name: "Leboncoin", url: "https://www.leboncoin.fr/deposer-une-annonce" },
+    { name: "Vinted", url: "https://www.vinted.fr/items/new" },
+    { name: "eBay", url: "https://www.ebay.fr/sl/sell" },
+  ],
+  donate: [
+    { name: "Geev", url: "https://www.geev.com/fr" },
+    { name: "Leboncoin (free)", url: "https://www.leboncoin.fr/deposer-une-annonce" },
+  ],
+};
+
 function card(item, base) {
   const a = item.analysis;
   const money = (v) => `${Math.round(v)} ${a.price.currency}`;
@@ -269,6 +288,15 @@ function card(item, base) {
       item.detection.crop_path), `${item.item_id}.jpg`, texts[shown].title, textOf()).catch(() => {}));
     actions.push(share);
   }
+  const post = el("div", { className: "post" }, (POST_TARGETS[a.triage.decision] || []).map((target) => {
+    const link = el("a", { href: target.url, target: "_blank", rel: "noopener", className: "chip",
+      textContent: target.name });
+    link.addEventListener("click", async () => { // the app or site opens; the text is ready to paste
+      try { await navigator.clipboard.writeText(textOf()); } catch {}
+      log(`${item.item_id}: listing text copied, paste it in ${target.name} and add the photo`);
+    });
+    return link;
+  }));
   const ad = el("div", { className: "ad" });
   const showAd = () => ad.replaceChildren(el("video", { src: base + item.ad_video, controls: true,
     playsInline: true, preload: "metadata",
@@ -332,6 +360,7 @@ function card(item, base) {
       el("div", { className: "muted", textContent: a.triage.reason + mode }),
       ad,
       el("div", { className: "actions" }, actions),
+      post,
       el("div", { className: "buyer" }, [...replies, ask, draft]),
     ]),
   ]);
