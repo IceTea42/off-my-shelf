@@ -91,6 +91,18 @@ uv run python -m off_my_shelf.smoke spark                     # one live call pe
   that part is AI-completed, the shot is labelled as such, and it is dropped if the model moved
   the item, added an object or invented (or hid) damage.
 
+## Agent guardrails
+
+Tested in CI on every push (`tests/test_agent_guardrails.py`): whatever the model proposes, these
+never reach the pack: accepting a lowball under the floor, moving payment to PayPal or a bank
+transfer, sharing a phone number, an email or a link, a lot under 70 % of its items' floors, a lot
+with an item to recycle, an unknown item, and any action on an item from the seller's never-sell
+list.
+
+Live behaviour of the model on hostile requests: `uv run python scripts/agent_eval.py` (lowball
+buyer, PayPal scam, never-sell item, seller's max discount, clearing cheap things as a lot).
+_Results table goes here after the run._
+
 ## Cost and latency per item
 
 _Filled from a real run with `uv run off-my-shelf costs packs/<run>` (S7)._
