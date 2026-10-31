@@ -75,7 +75,7 @@
   .trial span { flex:1; }
   .trial button { min-height:36px; padding:4px 10px; }
   .post { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
-  .post::before { content:"Post on"; color:var(--muted); font-size:12px; }
+  .post::before { content:attr(data-label); color:var(--muted); font-size:12px; }
   .post:empty { display:none; }
   .post .chip { text-decoration:none; display:inline-flex; align-items:center; border-radius:99px; }
   #grid.running .post { display:none; }
@@ -121,51 +121,48 @@
 <body>
 <div class="wrap">
   <h1>Off My Shelf</h1>
-  <p class="lead">Photograph or film the things you no longer use. Get ready-to-post listings,
-    sorted into sell, donate and recycle.</p>
+  <p class="lead" data-i18n="lead"></p>
 
   <form id="form">
     <div class="capture">
-      <label class="pick"><input id="snap" type="file" accept="image/*" capture="environment" hidden>Take a photo</label>
-      <label class="pick"><input id="film" type="file" accept="video/*" capture="environment" hidden>Film the shelf</label>
+      <label class="pick"><input id="snap" type="file" accept="image/*" capture="environment" hidden><span data-i18n="snap"></span></label>
+      <label class="pick"><input id="film" type="file" accept="video/*" capture="environment" hidden><span data-i18n="film"></span></label>
     </div>
     <label class="drop" id="drop">
       <input id="files" type="file" multiple accept="image/*,video/*,.heic,.heif,.avif,.jxl,.mkv,.mts,.m2ts" hidden>
-      <span id="drop-text">Drop photos or videos here, or click to choose</span>
+      <span id="drop-text" data-i18n="drop"></span>
     </label>
     <select id="language" aria-label="Listing language"></select>
-    <label class="muted"><input id="shots" type="checkbox" checked> AI-complete hidden parts</label>
-    <button id="start" type="submit" disabled>Create listings</button>
-    <button id="demo" class="ghost" type="button">Try the demo</button>
-    <p class="notice">Your photos and listings are kept up to 30 days so you can come back to them
-      (and to improve the app). Hide them from your list anytime; ask for deletion on
-      <a href="https://github.com/IceTea42/off-my-shelf/issues" target="_blank" rel="noopener">GitHub</a>.
-      Only list things you own.</p>
+    <label class="muted"><input id="shots" type="checkbox" checked> <span data-i18n="shots"></span></label>
+    <button id="start" type="submit" disabled data-i18n="start"></button>
+    <button id="demo" class="ghost" type="button" data-i18n="demo"></button>
+    <p class="notice"><span data-i18n="notice"></span>
+      <a href="https://github.com/IceTea42/off-my-shelf/issues" target="_blank" rel="noopener">GitHub</a></p>
   </form>
   <details id="trials" hidden>
-    <summary>My trials</summary>
+    <summary data-i18n="trials"></summary>
     <div id="trial-list"></div>
   </details>
 
   <div id="log" role="log" aria-live="polite" hidden></div>
   <div class="bar" id="bar" hidden>
     <strong id="summary"></strong>
-    <a id="zip"><button type="button">Download listing pack</button></a>
+    <a id="zip"><button type="button" data-i18n="download"></button></a>
   </div>
   <section class="agent" id="agent" hidden>
-    <strong>Tell the agent what you need</strong>
-    <textarea id="goal" rows="2" placeholder="e.g. I'm moving on Friday: sell the electronics fast and donate the books"></textarea>
+    <strong data-i18n="agentTitle"></strong>
+    <textarea id="goal" rows="2" data-i18n-placeholder="goalPh"></textarea>
     <details class="rules">
-      <summary>Your rules for the agent</summary>
-      <label>Never sell (item numbers or words, comma-separated)
+      <summary data-i18n="rules"></summary>
+      <label><span data-i18n="neverSell"></span>
         <input id="never-sell" type="text" placeholder="e.g. pokemon, item-004"></label>
-      <label>Largest discount for buyers, %
+      <label><span data-i18n="maxDiscount"></span>
         <input id="max-discount" type="number" min="0" max="90" step="5" placeholder="e.g. 20"></label>
     </details>
     <div class="actions">
-      <button id="run-agent" type="button">Run agent</button>
-      <button id="mic" class="ghost" type="button">Speak instead</button>
-      <button id="undo" class="ghost" type="button" hidden>Undo last agent session</button>
+      <button id="run-agent" type="button" data-i18n="runAgent"></button>
+      <button id="mic" class="ghost" type="button" data-i18n="mic"></button>
+      <button id="undo" class="ghost" type="button" hidden data-i18n="undo"></button>
     </div>
     <div id="proposal" hidden></div>
   </section>
@@ -175,6 +172,155 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+
+// The interface speaks the listing language picked in the form (English, French or Turkish).
+const UI = {
+ "en": {
+  "lead": "Photograph or film the things you no longer use. Get ready-to-post listings, sorted into sell, donate and recycle.",
+  "snap": "Take a photo",
+  "film": "Film the shelf",
+  "drop": "Drop photos or videos here, or click to choose",
+  "files": "{n} file(s): {names}",
+  "shots": "AI-complete hidden parts",
+  "start": "Create listings",
+  "demo": "Try the demo",
+  "notice": "Your photos and listings are kept up to 30 days so you can come back to them (and to improve the app). Hide them from your list anytime; ask for deletion on GitHub. Only list things you own.",
+  "trials": "My trials",
+  "download": "Download listing pack",
+  "agentTitle": "Tell the agent what you need",
+  "goalPh": "e.g. I'm moving on Friday: sell the electronics fast and donate the books",
+  "rules": "Your rules for the agent",
+  "neverSell": "Never sell (item numbers or words, comma-separated)",
+  "maxDiscount": "Largest discount for buyers, %",
+  "runAgent": "Run agent",
+  "mic": "Speak instead",
+  "stop": "Stop and send",
+  "undo": "Undo last agent session",
+  "copy": "Copy listing",
+  "copyLot": "Copy lot listing",
+  "copied": "Copied",
+  "share": "Share",
+  "videoAd": "Video ad",
+  "shareAd": "Share video ad",
+  "buyerPh": "Paste a buyer's message…",
+  "draft": "Draft a reply",
+  "approve": "Approve and copy",
+  "approved": "Approved: copied",
+  "original": "Original photo",
+  "clean": "Clean shot, real pixels",
+  "completed": "Hidden parts AI-completed",
+  "postOn": "Post on",
+  "proposes": "The agent proposes",
+  "apply": "Apply selected",
+  "discard": "Discard",
+  "open": "Open",
+  "hide": "Hide",
+  "condition": "Condition",
+  "summary": "{n} items · {s} to sell, about {v} €",
+  "lot": "lot of {n}"
+ },
+ "fr": {
+  "lead": "Photographiez ou filmez ce que vous n'utilisez plus. Obtenez des annonces prêtes à publier, triées entre vendre, donner et recycler.",
+  "snap": "Prendre une photo",
+  "film": "Filmer l'étagère",
+  "drop": "Déposez des photos ou vidéos ici, ou cliquez pour choisir",
+  "files": "{n} fichier(s) : {names}",
+  "shots": "Compléter par IA les parties cachées",
+  "start": "Créer les annonces",
+  "demo": "Voir la démo",
+  "notice": "Vos photos et annonces sont gardées 30 jours au plus pour que vous puissiez y revenir (et améliorer l'app). Masquez-les de votre liste quand vous voulez ; demandez leur suppression sur GitHub. Ne publiez que ce qui vous appartient.",
+  "trials": "Mes essais",
+  "download": "Télécharger les annonces",
+  "agentTitle": "Dites à l'agent ce qu'il vous faut",
+  "goalPh": "ex. Je déménage vendredi : vends vite l'électronique et donne les livres",
+  "rules": "Vos règles pour l'agent",
+  "neverSell": "Ne jamais vendre (numéros ou mots, séparés par des virgules)",
+  "maxDiscount": "Remise maximale aux acheteurs, %",
+  "runAgent": "Lancer l'agent",
+  "mic": "Parler",
+  "stop": "Arrêter et envoyer",
+  "undo": "Annuler la dernière session de l'agent",
+  "copy": "Copier l'annonce",
+  "copyLot": "Copier l'annonce du lot",
+  "copied": "Copié",
+  "share": "Partager",
+  "videoAd": "Pub vidéo",
+  "shareAd": "Partager la pub vidéo",
+  "buyerPh": "Collez le message d'un acheteur…",
+  "draft": "Rédiger une réponse",
+  "approve": "Approuver et copier",
+  "approved": "Approuvé : copié",
+  "original": "Photo d'origine",
+  "clean": "Photo nette, vrais pixels",
+  "completed": "Parties cachées complétées par IA",
+  "postOn": "Publier sur",
+  "proposes": "L'agent propose",
+  "apply": "Appliquer la sélection",
+  "discard": "Ignorer",
+  "open": "Ouvrir",
+  "hide": "Masquer",
+  "condition": "État",
+  "summary": "{n} objets · {s} à vendre, environ {v} €",
+  "lot": "lot de {n}"
+ },
+ "tr": {
+  "lead": "Artık kullanmadığınız eşyaların fotoğrafını veya videosunu çekin. Satış, bağış ve geri dönüşüm olarak ayrılmış, yayına hazır ilanlar alın.",
+  "snap": "Fotoğraf çek",
+  "film": "Rafı videoya çek",
+  "drop": "Fotoğraf veya videoları buraya bırakın ya da seçmek için tıklayın",
+  "files": "{n} dosya: {names}",
+  "shots": "Gizli kısımları yapay zekâyla tamamla",
+  "start": "İlanları oluştur",
+  "demo": "Demoyu dene",
+  "notice": "Fotoğraflarınız ve ilanlarınız, onlara geri dönebilmeniz (ve uygulamayı geliştirmek) için en fazla 30 gün saklanır. Listenizden istediğiniz zaman gizleyin; silinmeleri için GitHub'dan isteyin. Yalnızca size ait eşyaları listeleyin.",
+  "trials": "Denemelerim",
+  "download": "İlan paketini indir",
+  "agentTitle": "Ajana ne istediğinizi söyleyin",
+  "goalPh": "örn. Cuma günü taşınıyorum: elektronikleri hızlı sat, kitapları bağışla",
+  "rules": "Ajan için kurallarınız",
+  "neverSell": "Asla satma (eşya numaraları veya kelimeler, virgülle ayrılmış)",
+  "maxDiscount": "Alıcılara en fazla indirim, %",
+  "runAgent": "Ajanı çalıştır",
+  "mic": "Sesle söyle",
+  "stop": "Durdur ve gönder",
+  "undo": "Son ajan oturumunu geri al",
+  "copy": "İlanı kopyala",
+  "copyLot": "Toplu ilanı kopyala",
+  "copied": "Kopyalandı",
+  "share": "Paylaş",
+  "videoAd": "Video reklam",
+  "shareAd": "Video reklamı paylaş",
+  "buyerPh": "Alıcının mesajını yapıştırın…",
+  "draft": "Yanıt taslağı yaz",
+  "approve": "Onayla ve kopyala",
+  "approved": "Onaylandı: kopyalandı",
+  "original": "Orijinal fotoğraf",
+  "clean": "Net çekim, gerçek pikseller",
+  "completed": "Gizli kısımlar yapay zekâyla tamamlandı",
+  "postOn": "Şurada yayınla",
+  "proposes": "Ajanın önerileri",
+  "apply": "Seçilenleri uygula",
+  "discard": "Vazgeç",
+  "open": "Aç",
+  "hide": "Gizle",
+  "condition": "Durum",
+  "summary": "{n} eşya · {s} satılık, yaklaşık {v} €",
+  "lot": "{n}'li lot"
+ }
+};
+let uiLang = "en";
+function t(key, values = {}) {
+  const text = (UI[uiLang] || UI.en)[key] ?? UI.en[key];
+  return text.replace(/\{(\w+)\}/g, (_, name) => values[name] ?? "");
+}
+function applyLanguage(code) {
+  uiLang = UI[code] ? code : "en";
+  document.documentElement.lang = uiLang;
+  document.querySelectorAll("[data-i18n]").forEach((node) => (node.textContent = t(node.dataset.i18n)));
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((node) =>
+    (node.placeholder = t(node.dataset.i18nPlaceholder)));
+  if (chosen.length) choose(chosen);
+}
 const LANG_NAMES = { en: "English", fr: "Français", tr: "Türkçe" };
 let chosen = [];
 let current = null;
@@ -211,16 +357,16 @@ async function shareFile(url, filename, title, text) {
 function choose(files, add = false) {
   chosen = add ? [...chosen, ...files] : [...files];
   $("drop-text").textContent = chosen.length
-    ? `${chosen.length} file(s): ${chosen.map((f) => f.name).join(", ")}`
-    : "Drop photos or videos here, or click to choose";
+    ? t("files", { n: chosen.length, names: chosen.map((f) => f.name).join(", ") })
+    : t("drop");
   $("start").disabled = chosen.length === 0;
 }
 
 function bundleCard(bundle, crops) {
-  const copy = el("button", { type: "button", textContent: "Copy lot listing" });
+  const copy = el("button", { type: "button", textContent: t("copyLot") });
   const text = `${bundle.title}\n\n${bundle.description}\n\n${Math.round(bundle.price)} ${bundle.currency}`;
   copy.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(text); copy.textContent = "Copied"; }
+    try { await navigator.clipboard.writeText(text); copy.textContent = t("copied"); }
     catch { copy.textContent = "Copy failed"; }
   });
   return el("article", { className: "card lot" }, [
@@ -228,7 +374,7 @@ function bundleCard(bundle, crops) {
       el("img", { src: crops[id], alt: id, loading: "lazy" }))),
     el("div", { className: "body" }, [
       el("div", { className: "row" }, [el("h2", { textContent: bundle.title }),
-        el("span", { className: "badge sell", textContent: `lot of ${bundle.item_ids.length}` })]),
+        el("span", { className: "badge sell", textContent: t("lot", { n: bundle.item_ids.length }) })]),
       el("span", { className: "price", textContent: `${Math.round(bundle.price)} ${bundle.currency}` }),
       el("div", { className: "desc", textContent: bundle.description }),
       el("div", { className: "muted", textContent: bundle.item_ids.join(", ") }),
@@ -255,12 +401,12 @@ function card(item, base) {
   const a = item.analysis;
   const money = (v) => `${Math.round(v)} ${a.price.currency}`;
   const photos = [el("figure", {}, [el("img", { src: base + item.detection.crop_path,
-    alt: a.listing.title, loading: "lazy" }), el("figcaption", { textContent: "Original photo" })])];
+    alt: a.listing.title, loading: "lazy" }), el("figcaption", { textContent: t("original") })])];
   if (item.product_shots.length) {
     photos.push(el("figure", {}, [el("img", { src: base + item.product_shots[0],
       alt: "Product shot", loading: "lazy" }),
       el("figcaption", { textContent: item.product_shots[0].endsWith("-completed.jpg")
-        ? "Hidden parts AI-completed" : "Clean shot, real pixels" })]));
+        ? t("completed") : t("clean") })]));
   }
   // The listing in each language made so far; the chips switch it or ask for a translation.
   const texts = Object.fromEntries([a.listing, ...item.translations].map((t) => [t.language, t]));
@@ -292,15 +438,15 @@ function card(item, base) {
     });
     return chip;
   }));
-  const copy = el("button", { type: "button", textContent: "Copy listing" });
+  const copy = el("button", { type: "button", textContent: t("copy") });
   copy.addEventListener("click", async () => {
-    try { await navigator.clipboard.writeText(textOf()); copy.textContent = "Copied"; }
+    try { await navigator.clipboard.writeText(textOf()); copy.textContent = t("copied"); }
     catch { copy.textContent = "Copy failed"; }
-    setTimeout(() => (copy.textContent = "Copy listing"), 1500);
+    setTimeout(() => (copy.textContent = t("copy")), 1500);
   });
   const actions = [copy];
   if (navigator.share) { // phones: hand the listing and its photo to a marketplace or chat app
-    const share = el("button", { type: "button", className: "ghost", textContent: "Share" });
+    const share = el("button", { type: "button", className: "ghost", textContent: t("share") });
     share.addEventListener("click", () => shareFile(base + (item.product_shots[0] ||
       item.detection.crop_path), `${item.item_id}.jpg`, texts[shown].title, textOf()).catch(() => {}));
     actions.push(share);
@@ -314,13 +460,14 @@ function card(item, base) {
     });
     return link;
   }));
+  post.dataset.label = t("postOn");
   const ad = el("div", { className: "ad" });
   const showAd = () => ad.replaceChildren(el("video", { src: base + item.ad_video, controls: true,
     playsInline: true, preload: "metadata",
     poster: base + (item.product_shots[0] || item.detection.crop_path) }));
   if (item.ad_video) showAd();
   const adButton = el("button", { type: "button", className: "ghost",
-    textContent: item.ad_video ? "Share video ad" : "Video ad" });
+    textContent: item.ad_video ? t("shareAd") : t("videoAd") });
   adButton.addEventListener("click", async () => {
     adButton.disabled = true;
     try {
@@ -330,7 +477,7 @@ function card(item, base) {
         log(`${item.item_id}: making a 10 s video ad from its real photo…`, "muted");
         item.ad_video = (await postForm(`/api/runs/${current}/items/${item.item_id}/ad`, new FormData())).video;
         showAd();
-        adButton.textContent = "Share video ad";
+        adButton.textContent = t("shareAd");
         log(`${item.item_id}: video ad ready`);
       }
     } catch (error) {
@@ -344,19 +491,19 @@ function card(item, base) {
   const mode = item.pricing_mode ? ` · ${item.pricing_mode.replace("_", " ")}` : "";
   const replies = item.buyer_replies.map((reply, index) => {
     const approve = el("button", { type: "button", className: "ghost",
-      textContent: reply.approved ? "Approved: copy" : "Approve and copy" });
+      textContent: reply.approved ? t("approved") : t("approve") });
     approve.addEventListener("click", async () => {
       await fetch(`/api/runs/${current}/items/${item.item_id}/replies/${index}/approve`,
         { method: "POST" });
       try { await navigator.clipboard.writeText(reply.draft_reply); } catch {}
-      approve.textContent = "Approved: copied";
+      approve.textContent = t("approved");
     });
     return el("div", { className: "reply" + (reply.approved ? " ok" : "") }, [
       el("div", { className: "muted", textContent: `Buyer: ${reply.buyer_message}` }),
       el("div", { textContent: reply.draft_reply }), approve]);
   });
-  const ask = el("textarea", { rows: 1, placeholder: "Paste a buyer's message…" });
-  const draft = el("button", { type: "button", className: "ghost", textContent: "Draft a reply" });
+  const ask = el("textarea", { rows: 1, placeholder: t("buyerPh") });
+  const draft = el("button", { type: "button", className: "ghost", textContent: t("draft") });
   draft.addEventListener("click", () => ask.value.trim() &&
     callAgent({ buyer_item_id: item.item_id, buyer_message: ask.value.trim() }));
   return el("article", { className: "card", id: item.item_id }, [
@@ -371,7 +518,7 @@ function card(item, base) {
         el("span", { className: "muted", textContent: `${money(a.price.low)}–${money(a.price.high)}` }),
       ]),
       el("div", { className: "muted",
-        textContent: `Condition: ${a.condition.grade.replace("_", " ")}${defects}` }),
+        textContent: `${t("condition")}: ${a.condition.grade.replace("_", " ")}${defects}` }),
       langs,
       desc,
       el("div", { className: "muted", textContent: a.triage.reason + mode }),
@@ -413,7 +560,7 @@ function render(pack, base, running = false) {
   const items = pack.items;
   const selling = items.filter((i) => i.analysis.triage.decision === "sell");
   const value = selling.reduce((sum, i) => sum + i.analysis.price.suggested, 0);
-  $("summary").textContent = `${items.length} items · ${selling.length} to sell, about ${Math.round(value)} €`;
+  $("summary").textContent = t("summary", { n: items.length, s: selling.length, v: Math.round(value) });
   $("zip").href = `/api/runs/${current}/zip`;
   $("zip").hidden = running;
   $("bar").hidden = false;
@@ -508,8 +655,8 @@ function showProposal(actions) {
   if (!actions.length) { box.hidden = true; log("The agent proposes no change.", "muted"); return; }
   const rows = actions.map((text, index) => el("label", { className: "pick-action" }, [
     el("input", { type: "checkbox", checked: true, value: String(index) }), el("span", { textContent: text })]));
-  const apply = el("button", { type: "button", textContent: "Apply selected" });
-  const discard = el("button", { type: "button", className: "ghost", textContent: "Discard" });
+  const apply = el("button", { type: "button", textContent: t("apply") });
+  const discard = el("button", { type: "button", className: "ghost", textContent: t("discard") });
   apply.addEventListener("click", async () => {
     const body = new FormData();
     body.append("selected", rows.filter((r) => r.firstChild.checked).map((r) => r.firstChild.value).join(","));
@@ -525,7 +672,7 @@ function showProposal(actions) {
     }
   });
   discard.addEventListener("click", () => { box.hidden = true; log("Proposal discarded.", "muted"); });
-  box.replaceChildren(el("strong", { textContent: "The agent proposes" }), ...rows,
+  box.replaceChildren(el("strong", { textContent: t("proposes") }), ...rows,
     el("div", { className: "actions" }, [apply, discard]));
   box.hidden = false;
 }
@@ -563,7 +710,7 @@ async function startMic() {
     if (seconds >= MAX_RECORD_S) stopMic().catch(showMicError);
   }, 500);
   recorder = { stream, media, chunks, stopped, tick };
-  $("mic").textContent = "Stop and send"; $("mic").className = "rec";
+  $("mic").textContent = t("stop"); $("mic").className = "rec";
 }
 
 async function stopMic() {
@@ -574,7 +721,7 @@ async function stopMic() {
   media.stop();
   await stopped;
   stream.getTracks().forEach((t) => t.stop());
-  $("mic").textContent = "Speak instead"; $("mic").className = "ghost";
+  $("mic").textContent = t("mic"); $("mic").className = "ghost";
   const type = media.mimeType || chunks[0]?.type || "audio/webm";
   const blob = new Blob(chunks, { type });
   if (!blob.size) throw new Error("the microphone sent no audio: check the input device");
@@ -591,7 +738,7 @@ async function stopMic() {
 function showMicError(error) {
   if (recorder) { clearInterval(recorder.tick); recorder.stream.getTracks().forEach((t) => t.stop()); }
   recorder = null;
-  $("mic").textContent = "Speak instead"; $("mic").className = "ghost";
+  $("mic").textContent = t("mic"); $("mic").className = "ghost";
   log(`Voice failed: ${error.message}`, "error");
 }
 
@@ -606,9 +753,9 @@ async function loadTrials() {
   const rows = await (await fetch("/api/trials")).json();
   $("trials").hidden = rows.length === 0;
   $("trial-list").replaceChildren(...rows.map((row) => {
-    const open = el("button", { type: "button", className: "ghost", textContent: "Open" });
+    const open = el("button", { type: "button", className: "ghost", textContent: t("open") });
     open.addEventListener("click", () => follow(row.run_id));
-    const hide = el("button", { type: "button", className: "ghost", textContent: "Hide" });
+    const hide = el("button", { type: "button", className: "ghost", textContent: t("hide") });
     hide.addEventListener("click", async () => {
       await postForm(`/api/trials/${row.run_id}/hide`, new FormData());
       loadTrials();
@@ -628,6 +775,10 @@ async function init() {
   $("language").replaceChildren(...config.languages.map((code) =>
     el("option", { value: code, textContent: LANG_NAMES[code] || code,
       selected: code === config.default_language })));
+  const browser = (navigator.language || "en").slice(0, 2);
+  if (config.languages.includes(browser)) $("language").value = browser;
+  applyLanguage($("language").value);
+  $("language").addEventListener("change", () => applyLanguage($("language").value));
   if (config.offline) log("Offline mode: no API key set. The demo and cached runs still work.", "warn");
   $("files").addEventListener("change", (e) => choose(e.target.files));
   ["snap", "film"].forEach((id) => $(id).addEventListener("change", (e) => {
