@@ -55,7 +55,7 @@ def _plate() -> tuple[Image.Image, np.ndarray, PixelBox]:
 
 def test_studio_canvas_uses_real_pixels_and_marks_hidden_parts() -> None:
     image, mask, box = _plate()
-    canvas = studio_canvas(image, mask, box, size=100, margin=0.1)
+    canvas = studio_canvas(image, mask, box, size=100)
     assert canvas.real.size == (100, 100) and canvas.real.mode == "RGB"
     assert canvas.hidden_share == pytest.approx(64 / 400)
     assert canvas.real.getpixel((15, 15)) == (0, 0, 200)  # real item pixels
@@ -81,3 +81,17 @@ def test_pixel_lock_restores_visible_pixels_and_measures_drift() -> None:
     locked, drift = pixel_lock(redrawn, canvas)
     assert drift > 0.5
     assert locked.size == (100, 100) and locked.getpixel((15, 15)) == (0, 0, 200)
+
+
+def test_cut_off_item_gets_a_band_to_complete_past_the_edge() -> None:
+    image = Image.new("RGB", (40, 40), "red")
+    mask = np.zeros((40, 40), bool)
+    mask[10:30, 0:15] = True  # touches the left border
+    box = PixelBox(0, 10, 15, 30)
+    plain = studio_canvas(image, mask, box, size=100)
+    grown = studio_canvas(image, mask, box, size=100, extend=0.3)
+    assert plain.hidden_share == 0 and grown.hidden_share > 0.1
+    assert grown.hidden.any() and not (grown.hidden & grown.visible).any()
+    assert (
+        np.nonzero(grown.hidden)[1].max() < np.nonzero(grown.visible)[1].min() + 2
+    )  # band is left

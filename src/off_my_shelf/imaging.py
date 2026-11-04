@@ -99,6 +99,7 @@ def mask_image(mask: BoolMask) -> Image.Image:
 
 HIDDEN_COLOUR = (255, 0, 255)
 STUDIO_WHITE = (255, 255, 255)
+CANVAS_MARGIN = 0.1  # white space around the item on each side of the studio canvas
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,11 +117,19 @@ class StudioCanvas:
 
 
 def studio_canvas(
-    image: Image.Image, mask: BoolMask, box: PixelBox, size: int = 1024, margin: float = 0.1
+    image: Image.Image,
+    mask: BoolMask,
+    box: PixelBox,
+    *,
+    size: int = 1024,
+    extend: float = 0.0,
 ) -> StudioCanvas:
     """Centre the masked item on a white square, scaled to fill it, with a soft floor shadow.
 
     Hidden = inside the item's convex hull but not visible, i.e. covered by another object.
+    With ``extend`` > 0, an item cut off by the photo's border also gets a hidden band past
+    that border (``extend`` times its size): its cut edge pushed outwards, for the image
+    model to complete the part outside the photo.
     """
     local = mask[box.top : box.bottom, box.left : box.right].astype(np.uint8)
     hull = np.zeros_like(local)
@@ -128,11 +137,17 @@ def studio_canvas(
     if points is not None:
         cv2.fillConvexPoly(hull, cv2.convexHull(points), 1)
     hidden_local = (hull == 1) & (local == 0)
-    share = float(hidden_local.sum() / max(int(hull.sum()), 1))
+    outline = int(hull.sum())
+    pixels = np.array(crop(image.convert("RGB"), box))
+    if extend > 0:
+        inside = int(hidden_local.sum())
+        local, hidden_local, pixels = _extend_cut_edges(mask, local, hidden_local, pixels, extend)
+        outline += int(hidden_local.sum()) - inside  # the band past the photo's edge
+    share = float(hidden_local.sum() / max(outline, 1))
 
-    scale = size * (1 - 2 * margin) / max(box.right - box.left, box.bottom - box.top)
-    width = max(1, round((box.right - box.left) * scale))
-    height = max(1, round((box.bottom - box.top) * scale))
+    rows, cols = local.shape
+    scale = size * (1 - 2 * CANVAS_MARGIN) / max(rows, cols)
+    width, height = max(1, round(cols * scale)), max(1, round(rows * scale))
     left, top = (size - width) // 2, (size - height) // 2
 
     def place(layer: np.ndarray) -> BoolMask:
@@ -144,15 +159,39 @@ def studio_canvas(
         return out
 
     visible, hidden = place(local), place(hidden_local)
-    pixels = crop(image.convert("RGB"), box).resize((width, height), Image.Resampling.LANCZOS)
+    resized = Image.fromarray(pixels).resize((width, height), Image.Resampling.LANCZOS)
     item = np.zeros((size, size, 3), dtype=np.uint8)
-    item[top : top + height, left : left + width] = np.array(pixels)
+    item[top : top + height, left : left + width] = np.array(resized)
 
     canvas = np.array(_shadow(size, left, top + height, width), dtype=np.uint8)
     canvas[visible] = item[visible]
     to_fill = canvas.copy()
     to_fill[hidden] = HIDDEN_COLOUR
     return StudioCanvas(Image.fromarray(canvas), Image.fromarray(to_fill), visible, hidden, share)
+
+
+def _extend_cut_edges(
+    mask: BoolMask, local: np.ndarray, hidden: BoolMask, pixels: np.ndarray, extend: float
+) -> tuple[np.ndarray, BoolMask, np.ndarray]:
+    """Grow the item's crop past each photo border it touches, marking the cut edge's
+    continuation as hidden."""
+    band = max(1, round(extend * max(local.shape)))
+    top, bottom = band * bool(mask[0].any()), band * bool(mask[-1].any())
+    left, right = band * bool(mask[:, 0].any()), band * bool(mask[:, -1].any())
+    pad = ((top, bottom), (left, right))
+    local, hidden = np.pad(local, pad), np.pad(hidden, pad)
+    pixels = np.pad(pixels, (*pad, (0, 0)), constant_values=255)
+    rows, cols = local.shape
+    edge = local.astype(bool)
+    if top:
+        hidden[:top] |= edge[top][None, :]
+    if bottom:
+        hidden[rows - bottom :] |= edge[rows - bottom - 1][None, :]
+    if left:
+        hidden[:, :left] |= edge[:, left][:, None]
+    if right:
+        hidden[:, cols - right :] |= edge[:, cols - right - 1][:, None]
+    return local, hidden, pixels
 
 
 def _shadow(size: int, left: int, bottom: int, width: int) -> Image.Image:

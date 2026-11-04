@@ -55,6 +55,7 @@ SHOT_ATTEMPTS = 2
 HIDDEN_MIN_SHARE = 0.02  # below this, tiny mask gaps are noise, not occlusion
 MAX_DRIFT = 0.12  # mean visible-pixel change above which a completion redrew the item
 CROP_PADDING = 0.08
+CUT_EXTEND = 0.3  # an item cut off by the photo edge gets this much room to be completed
 BACKGROUND_SHARE = 0.9  # a detection filling this much of the frame, next to others, is the surface
 Progress = Callable[[str], None]
 
@@ -352,7 +353,8 @@ class Pipeline:
             (out_dir / rel).parent.mkdir(parents=True, exist_ok=True)
             (out_dir / rel).write_bytes(data)
 
-        canvas = studio_canvas(image, found.segment.mask, box)
+        cut_off = touches_edge(found.segment.mask)
+        canvas = studio_canvas(image, found.segment.mask, box, extend=CUT_EXTEND * cut_off)
         async with self._limit:
             analysis, failed = await self.services.listing.analyze(
                 item_crop, language, found.phrase, canvas.real
@@ -376,7 +378,7 @@ class Pipeline:
             analysis=analysis.value,
             product_shots=[studio],
             partly_hidden=canvas.hidden_share > HIDDEN_MIN_SHARE
-            or touches_edge(found.segment.mask)
+            or cut_off
             or not analysis.value.whole_item_visible,
             calls=[*found.calls, analysis.call],
         )
