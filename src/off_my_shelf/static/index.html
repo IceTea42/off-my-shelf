@@ -87,7 +87,14 @@
   .rules input { font:inherit; padding:8px 10px; border-radius:10px; border:1px solid var(--line); }
   #proposal { display:grid; gap:6px; border-top:1px solid var(--line); padding-top:10px; }
   .pick-action { display:flex; gap:8px; align-items:flex-start; font-size:14px; }
-  #sources { display:flex; gap:12px; overflow-x:auto; margin:0 0 16px; }
+  #sources { display:grid; gap:16px; margin:0 0 16px; }
+  .source-row { display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap; }
+  .found { flex:1 1 280px; margin:0; padding:0; list-style:none; column-width:260px; column-gap:20px;
+           max-height:360px; overflow:auto; font-size:14px; }
+  .found li { break-inside:avoid; padding:3px 0; }
+  .found a { color:var(--ink); text-decoration:none; }
+  .found .n { font-weight:700; }
+  .found .d { font-size:12px; font-weight:600; color:#fff; border-radius:99px; padding:1px 7px; }
   .source { position:relative; flex:0 0 auto; max-width:100%; aspect-ratio:auto; background:none; }
   .source img { display:block; max-height:360px; max-width:100%; width:auto; height:auto;
                 border-radius:12px; }
@@ -649,9 +656,27 @@ function renderSources(pack, base) {
         width: `${(b.x1 - b.x0) * 100}%`, height: `${(b.y1 - b.y0) * 100}%` });
       return box;
     });
-    return el("figure", { className: "source" }, [
+    const figure = el("figure", { className: "source" }, [
       el("img", { src: base + path, alt: "Your photo", loading: "lazy" }), ...boxes]);
+    return el("div", { className: "source-row" }, [figure, foundList(pack.items.filter(
+      (i) => i.detection.source.media === path))]);
   }));
+}
+
+// Next to each photo: its items by number, "4 · sell · Halloween decor" (at most MAX_FOUND).
+const MAX_FOUND = 30;
+function foundList(items) {
+  const rows = items.slice(0, MAX_FOUND).map((item) => {
+    const decision = item.analysis.triage.decision;
+    const title = unlisted(item) ? item.analysis.identification.name : item.analysis.listing.title;
+    const line = [el("span", { className: "n", textContent: `${Number(item.item_id.split("-")[1])} · ` }),
+      el("span", { className: `d ${decision}`, textContent: t(decision) }), ` ${title}`];
+    return el("li", {}, [unlisted(item) ? el("span", {}, line)
+      : el("a", { href: `#${item.item_id}` }, line)]);
+  });
+  if (items.length > MAX_FOUND) rows.push(el("li", { className: "muted",
+    textContent: `+ ${items.length - MAX_FOUND} more below` }));
+  return el("ol", { className: "found" }, rows);
 }
 
 // Rubbish ("bin") and things that stay ("keep", e.g. the table under the items) get no card:
