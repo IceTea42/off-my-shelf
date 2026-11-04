@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import logfire
+import numpy as np
 from openai import OpenAIError
 
 from off_my_shelf.cache import DiskCache, OfflineCacheMissError
@@ -112,6 +113,11 @@ class _Found:
 
 QUALIFIER = re.compile(r"\s+(?:with|on|in|at|of|next to|behind|under|near|from)\s.*$")
 MIN_CONFIDENCE = 0.25  # below this the listing says "can't tell what this is": no card
+
+
+def touches_edge(mask: np.ndarray) -> bool:
+    """The item reaches the photo's border, so part of it is likely cut off."""
+    return bool(mask[0].any() or mask[-1].any() or mask[:, 0].any() or mask[:, -1].any())
 
 
 def fallback_phrases(item: SceneItem) -> list[str]:
@@ -346,13 +352,13 @@ class Pipeline:
             (out_dir / rel).parent.mkdir(parents=True, exist_ok=True)
             (out_dir / rel).write_bytes(data)
 
+        canvas = studio_canvas(image, found.segment.mask, box)
         async with self._limit:
             analysis, failed = await self.services.listing.analyze(
-                item_crop, language, found.phrase
+                item_crop, language, found.phrase, canvas.real
             )
         if failed:
             self.progress(f"{stem}: listing fell back past {', '.join(failed)}")
-        canvas = studio_canvas(image, found.segment.mask, box)
         studio = _save(out_dir, f"shots/{stem}.jpg", encode(canvas.real, "JPEG", quality=92))
         item = Item(
             item_id=item_id,
@@ -369,7 +375,9 @@ class Pipeline:
             ),
             analysis=analysis.value,
             product_shots=[studio],
-            partly_hidden=canvas.hidden_share > HIDDEN_MIN_SHARE,
+            partly_hidden=canvas.hidden_share > HIDDEN_MIN_SHARE
+            or touches_edge(found.segment.mask)
+            or not analysis.value.whole_item_visible,
             calls=[*found.calls, analysis.call],
         )
         self.partial[item_id] = item  # the card can show now; a completed shot may follow

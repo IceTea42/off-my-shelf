@@ -300,6 +300,7 @@ class SparkAnalyzer:
         language: Language,
         subject: str | None = None,
         note: str | None = None,
+        cutout: Image.Image | None = None,
     ) -> SparkResult[ItemAnalysis]:
         """The listing for the ``subject`` (the inventory's phrase) in the crop: a crop around a
         sofa also shows the cushions on it, and the listing must be the sofa's."""
@@ -314,7 +315,16 @@ class SparkAnalyzer:
         system = ANALYZE_SYSTEM.format(
             language=LANGUAGE_NAMES[language], skeleton=_skeleton(ItemAnalysis)
         )
+        if cutout is not None:
+            text += (
+                "\nImage 2 is the item cut out of the photo by a segmentation model, as a buyer "
+                "would see it. Set whole_item_visible to false if it does not show the entire "
+                "item: cut off by the photo edge, hidden behind something, or with holes or "
+                "missing pieces."
+            )
         content = [{"type": "text", "text": text}, _image_part(crop)]
+        if cutout is not None:
+            content.append(_image_part(cutout))
         result = await self._structured(PipelineStep.ANALYZE, system, content, ItemAnalysis)
         if result.value.listing.language is not language:
             listing = result.value.listing.model_copy(update={"language": language})
@@ -507,13 +517,13 @@ class ListingChain:
         self.providers = list(providers)
 
     async def analyze(
-        self, crop: Image.Image, language: Language, subject: str
+        self, crop: Image.Image, language: Language, subject: str, cutout: Image.Image
     ) -> tuple[SparkResult[ItemAnalysis], list[str]]:
         """The listing, and the providers that failed before it (for the run log)."""
         failed: list[str] = []
         for provider in self.providers:
             try:
-                result = await provider.analyzer.analyze(crop, language, subject)
+                result = await provider.analyzer.analyze(crop, language, subject, cutout=cutout)
             except (OpenAIError, SparkReplyError, OfflineCacheMissError) as error:
                 failed.append(f"{provider.name} ({type(error).__name__})")
                 if provider is self.providers[-1]:

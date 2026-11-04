@@ -415,6 +415,12 @@
         },
         "triage": {
           "$ref": "#/$defs/Triage"
+        },
+        "whole_item_visible": {
+          "default": true,
+          "description": "False when the cut-out misses part of the item: cut off by the photo edge, hidden behind something, or with holes or missing pieces.",
+          "title": "Whole Item Visible",
+          "type": "boolean"
         }
       },
       "required": [

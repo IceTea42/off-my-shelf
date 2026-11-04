@@ -10,6 +10,7 @@ import pytest
 from openai import APIConnectionError, InternalServerError
 from PIL import Image
 
+import fakes as fakes_module
 from fakes import SAM_SIZE, SHOT_BAD, SHOT_OK, FakeMetaClient, fake_services
 from off_my_shelf import pipeline
 from off_my_shelf.cache import DiskCache, OfflineCacheMissError
@@ -401,3 +402,41 @@ async def test_unidentified_items_are_dropped_with_a_warning(
         [_photo(tmp_path / "in")], tmp_path / "out"
     )
     assert pack.items == [] and any("could not tell what it is" in w for w in pack.warnings)
+
+
+def test_touches_edge() -> None:
+    mask = np.zeros((10, 10), bool)
+    mask[3:6, 3:6] = True
+    assert not pipeline.touches_edge(mask)
+    mask[3:6, 0] = True
+    assert pipeline.touches_edge(mask)
+
+
+async def test_listing_sees_the_cutout_and_flags_a_partial_item(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _settings(tmp_path)
+    client = FakeMetaClient(phrases=["plate"])
+    pack = await Pipeline(_services(client, settings), settings).run(
+        [_photo(tmp_path / "in")], tmp_path / "out"
+    )
+    listing = next(
+        c
+        for c in client.chat_calls
+        if c["response_format"]["json_schema"]["name"] == "ItemAnalysis"
+    )
+    images = [p for p in listing["messages"][-1]["content"] if p["type"] == "image_url"]
+    assert len(images) == 2 and not pack.items[0].partly_hidden  # crop + cut-out, all visible
+
+    monkeypatch.setattr(
+        fakes_module,
+        "ANALYSIS_JSON",
+        fakes_module.ANALYSIS_JSON.replace(
+            '"whole_item_visible":true', '"whole_item_visible":false'
+        ),
+    )
+    fresh = _settings(tmp_path / "fresh")  # its own cache: the listing call runs again
+    again = await Pipeline(_services(FakeMetaClient(["plate"]), fresh), fresh).run(
+        [_photo(tmp_path / "in2")], tmp_path / "out2"
+    )
+    assert again.items[0].partly_hidden

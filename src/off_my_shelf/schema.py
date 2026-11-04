@@ -148,6 +148,11 @@ class ItemAnalysis(_Model):
     price: PriceEstimate
     listing: ListingText
     triage: Triage
+    whole_item_visible: bool = Field(
+        default=True,
+        description="False when the cut-out misses part of the item: cut off by the photo "
+        "edge, hidden behind something, or with holes or missing pieces.",
+    )
 
 
 # --- Pipeline additions ------------------------------------------------------------------
