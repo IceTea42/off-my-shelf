@@ -80,9 +80,10 @@
   .post { min-height:36px; max-width:100%; }
   .fix { display:flex; gap:6px; }
   .card { position:relative; }
+  #unhide { min-height:28px; padding:2px 10px; font-size:12px; }
   .card-x { position:absolute; top:6px; right:6px; z-index:2; width:26px; height:26px; min-height:0;
             padding:0; border-radius:50%; border:none; background:rgba(0,0,0,.45); color:#fff;
-            font-size:16px; line-height:26px; cursor:pointer; }
+            font-size:18px; font-weight:700; line-height:26px; cursor:pointer; }
   .fix input { flex:1; min-width:0; }
   #grid.running .fix { display:none; }
   #grid.running .post { display:none; }
@@ -161,6 +162,7 @@
   <div id="log" role="log" aria-live="polite" hidden></div>
   <div class="bar" id="bar" hidden>
     <strong id="summary"></strong>
+    <button type="button" id="unhide" class="ghost small" hidden></button>
     <a id="zip"><button type="button" data-i18n="download"></button></a>
   </div>
   <section class="agent" id="agent" hidden>
@@ -233,6 +235,7 @@ const UI = {
   "clean": "Clean shot, real pixels",
   "retake": "Partly hidden: retake the photo",
   "hideCard": "Hide this card",
+  "unhide": "Show {n} hidden",
   "completed": "Hidden parts AI-completed",
   "postOn": "Post on",
   "proposes": "The agent proposes",
@@ -288,6 +291,7 @@ const UI = {
   "clean": "Photo nette, vrais pixels",
   "retake": "En partie caché : reprenez la photo",
   "hideCard": "Masquer cette fiche",
+  "unhide": "Réafficher {n} masquée(s)",
   "completed": "Parties cachées complétées par IA",
   "postOn": "Publier sur",
   "proposes": "L'agent propose",
@@ -343,6 +347,7 @@ const UI = {
   "clean": "Net çekim, gerçek pikseller",
   "retake": "Kısmen gizli: fotoğrafı yeniden çekin",
   "hideCard": "Bu kartı gizle",
+  "unhide": "{n} gizli kartı göster",
   "completed": "Gizli kısımlar yapay zekâyla tamamlandı",
   "postOn": "Şurada yayınla",
   "proposes": "Ajanın önerileri",
@@ -617,7 +622,7 @@ function card(item, base) {
   };
   fixButton.addEventListener("click", fix);
   fixText.addEventListener("keydown", (e) => e.key === "Enter" && fix());
-  const close = el("button", { type: "button", className: "card-x", textContent: "×",
+  const close = el("button", { type: "button", className: "card-x", textContent: "–",
     title: t("hideCard"), ariaLabel: t("hideCard") });
   close.addEventListener("click", () => hideCard(item.item_id, root));
   const root = el("article", { className: "card", id: item.item_id }, [close,
@@ -687,9 +692,14 @@ function loadHidden(runId) {
   try { hiddenCards = new Set(JSON.parse(localStorage.getItem(`oms-hidden-${runId}`) || "[]")); }
   catch { hiddenCards = new Set(); }
 }
+function saveHidden() {
+  try { localStorage.setItem(`oms-hidden-${current}`, JSON.stringify([...hiddenCards])); } catch {}
+  $("unhide").hidden = hiddenCards.size === 0;
+  $("unhide").textContent = t("unhide", { n: hiddenCards.size });
+}
 function hideCard(itemId, node) {
   hiddenCards.add(itemId);
-  try { localStorage.setItem(`oms-hidden-${current}`, JSON.stringify([...hiddenCards])); } catch {}
+  saveHidden();
   node.remove();
 }
 
@@ -718,7 +728,9 @@ function logUnlisted(items) {
 }
 
 // While a run is going, cards show as soon as their listing is ready (actions come at the end).
+let lastRender = [];
 function render(pack, base, running = false) {
+  lastRender = [pack, base, running];
   const items = pack.items;
   const selling = items.filter((i) => i.analysis.triage.decision === "sell");
   const value = selling.reduce((sum, i) => sum + i.analysis.price.suggested, 0);
@@ -733,6 +745,7 @@ function render(pack, base, running = false) {
     ...items.filter((i) => !unlisted(i) && !hiddenCards.has(i.item_id))
       .sort((x, y) => needsRetake(x) - needsRetake(y)).map((item) => card(item, base)));
   renderSources(pack, base);
+  saveHidden();
   if (!items.length && !running) log("No items found: try a closer photo.", "warn");
 }
 
@@ -993,6 +1006,7 @@ async function init() {
   });
   $("form").addEventListener("submit", start);
   $("undo").addEventListener("click", undoAgent);
+  $("unhide").addEventListener("click", () => { hiddenCards.clear(); saveHidden(); render(...lastRender); });
   $("run-agent").addEventListener("click", () => $("goal").value.trim() &&
     callAgent({ goal: $("goal").value.trim() }));
   $("mic").addEventListener("click", () => (recorder ? stopMic() : startMic()).catch(showMicError));
