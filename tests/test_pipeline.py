@@ -179,6 +179,7 @@ async def test_rejected_shots_are_retried_then_dropped(
     assert len(client.image_calls) == 2
     assert client.image_calls[1]["prompt"].startswith("A previous attempt was rejected: dent")
     assert pack.items[0].product_shots == ["shots/item-001-plate.jpg"]
+    assert pack.items[0].partly_hidden  # the page puts it last and asks for a new photo
     assert any("completion rejected: dent" in m for m in messages)
 
 

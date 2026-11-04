@@ -214,6 +214,9 @@ class Item(_Model):
     analysis: ItemAnalysis
     pricing_mode: PricingMode | None = None
     product_shots: list[RelPath] = []
+    partly_hidden: bool = Field(
+        default=False, description="Part of the item is hidden in the photo (behind something)"
+    )
     owner_note: Annotated[str, Field(max_length=2000)] | None = Field(
         default=None,
         description="What the owner told the AI about the item (typed or spoken)",

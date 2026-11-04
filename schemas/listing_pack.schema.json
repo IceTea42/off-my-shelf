@@ -301,6 +301,12 @@
           "title": "Product Shots",
           "type": "array"
         },
+        "partly_hidden": {
+          "default": false,
+          "description": "Part of the item is hidden in the photo (behind something)",
+          "title": "Partly Hidden",
+          "type": "boolean"
+        },
         "owner_note": {
           "anyOf": [
             {

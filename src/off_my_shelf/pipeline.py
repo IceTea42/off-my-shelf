@@ -369,6 +369,7 @@ class Pipeline:
             ),
             analysis=analysis.value,
             product_shots=[studio],
+            partly_hidden=canvas.hidden_share > HIDDEN_MIN_SHARE,
             calls=[*found.calls, analysis.call],
         )
         self.partial[item_id] = item  # the card can show now; a completed shot may follow
