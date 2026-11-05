@@ -5,8 +5,6 @@
 **Film the things you no longer use. Get ready-to-post listings, sorted into sell, donate and
 recycle.**
 
-Live app: [icetea-off-my-shelf.hf.space](https://icetea-off-my-shelf.hf.space) (installs on Android) · Demo video: _coming in S5_
-
 Off My Shelf turns a photo or a short video of a shelf into one listing per item: what it is,
 its condition, a fair second-hand price, a title and description in English, French or Turkish,
 a clean product shot, and a sell / donate / recycle decision. An agent then acts on the whole
